@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "/Users/joshuayu/STM32CubeIDE/workspace_1.17.0/H755Custom/CM7/Core/Src",
+      "program": "/Users/joshuayu/STM32CubeIDE/workspace_1.17.0/H755Custom/CM7/Core/Src/build/Debug/outDebug"
+    }
+  ]
+}
