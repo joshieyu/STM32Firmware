@@ -38,13 +38,21 @@
 #endif
 
 #define PCM1865_Reg_Size 128
-#define AUDIO_BUFFER_SIZE  4096
+#define AUDIO_BUFFER_SIZE 512
 #define TRIANGLE_BUFFER_SIZE 8192
 #define MAX_AMPLITUDE_16BIT (32767)
 #define MIN_AMPLITUDE_16BIT (-32768)
+#define MAX_AMPLITUDE_24BIT (8388607)
+#define MIN_AMPLITUDE_24BIT (-8388608)
+// #define MAX_AMPLITUDE_24BIT (4150000)
+// #define MIN_AMPLITUDE_24BIT (-4150000)
+#define TDM_SLOTS 8
+#define STEREO_CHANNELS 2
+#define TDM_RX_HALF_SIZE 2048
+#define STEREO_TX_HALF_SIZE 512
 
-#define PCM1865_I2C_ADDR   (0x4A << 1)   // Adjust this based on your hardware strap
-#define PCM1865_I2C_ADDR_2   (0x4B << 1)   // Adjust this based on your hardware strap
+#define PCM1865_I2C_ADDR   0x94   // Adjust this based on your hardware strap
+#define PCM1865_I2C_ADDR_2   0x96   // Adjust this based on your hardware strap
 #define SINE_SAMPLES 440
 
 #define PCM1865_RESET               (0x00)
@@ -62,59 +70,13 @@
 #define PCM1865_CLK_CFG0            (0x20) // Basic clock config.
 #define PCM1865_PLL_STATE			(0x28)
 #define PCM1865_PWR_STATE           (0x70) // Power down, Sleep, Standby
+#define PCM1865_PGA_VAL_CH1_L       (0x01)
+#define PCM1865_PGA_VAL_CH1_R       (0x02)
+#define PCM1865_PGA_VAL_CH2_L       (0x03)
+#define PCM1865_PGA_VAL_CH2_R       (0x04)
 #define DC_VALUE_TO_TRANSMIT ((int32_t)500000) << 8 // Example: Output a positive DC level
 
-// --- Global or Static Buffer ---
-// Buffer needs to hold exactly ONE stereo sample pair (Left, Right).
-// Must be accessible by DMA (global or static).
-int32_t single_value_dma_buffer[2]; // Size is 2 for L/R pair
 
-// Global buffer to capture ADC data from SAI
-int32_t audioRxBuffer[AUDIO_BUFFER_SIZE];
-int32_t audioPlaybackBuffer[AUDIO_BUFFER_SIZE * 2];
-
-int32_t triangleBuffer[TRIANGLE_BUFFER_SIZE * 2];
-
-int16_t Wave_LUT[128] = {
-    2048, 2149, 2250, 2350, 2450, 2549, 2646, 2742, 2837, 2929, 3020, 3108, 3193, 3275, 3355,
-    3431, 3504, 3574, 3639, 3701, 3759, 3812, 3861, 3906, 3946, 3982, 4013, 4039, 4060, 4076,
-    4087, 4094, 4095, 4091, 4082, 4069, 4050, 4026, 3998, 3965, 3927, 3884, 3837, 3786, 3730,
-    3671, 3607, 3539, 3468, 3394, 3316, 3235, 3151, 3064, 2975, 2883, 2790, 2695, 2598, 2500,
-    2400, 2300, 2199, 2098, 1997, 1896, 1795, 1695, 1595, 1497, 1400, 1305, 1212, 1120, 1031,
-    944, 860, 779, 701, 627, 556, 488, 424, 365, 309, 258, 211, 168, 130, 97,
-    69, 45, 26, 13, 4, 0, 1, 8, 19, 35, 56, 82, 113, 149, 189,
-    234, 283, 336, 394, 456, 521, 591, 664, 740, 820, 902, 987, 1075, 1166, 1258,
-    1353, 1449, 1546, 1645, 1745, 1845, 1946, 2047
-};
-
-int16_t sine_wave_table_128_samples[128 * 2] = {
-        0,     0,    491,   491,    980,   980,   1467,  1467,   1951,  1951,
-     2429,  2429,   2900,  2900,   3362,  3362,   3813,  3813,   4253,  4253,
-     4679,  4679,   5091,  5091,   5487,  5487,   5867,  5867,   6229,  6229,
-     6573,  6573,   6898,  6898,   7203,  7203,   7488,  7488,   7753,  7753,
-     7997,  7997,   8219,  8219,   8420,  8420,   8600,  8600,   8758,  8758,
-     8895,  8895,   9011,  9011,   9106,  9106,   9181,  9181,   9236,  9236,
-     9271,  9271,   9287,  9287,   9283,  9283,   9261,  9261,   9219,  9219,
-     9158,  9158,   9079,  9079,   8982,  8982,   8868,  8868,   8737,  8737,
-     8590,  8590,   8428,  8428,   8251,  8251,   8061,  8061,   7857,  7857,
-     7642,  7642,   7415,  7415,   7178,  7178,   6930,  6930,   6673,  6673,
-     6407,  6407,   6133,  6133,   5851,  5851,   5562,  5562,   5267,  5267,
-     4966,  4966,   4660,  4660,   4350,  4350,   4036,  4036,   3719,  3719,
-     3400,  3400,   3079,  3079,   2757,  2757,   2435,  2435,   2113,  2113,
-     1792,  1792,   1473,  1473,   1155,  1155,    839,   839,    526,   526,
-      214,   214,   -95,   -95,   -403,  -403,   -708,  -708,  -1010, -1010,
-    -1308, -1308,  -1602, -1602,  -1891, -1891,  -2175, -2175,  -2453, -2453,
-    -2725, -2725,  -2990, -2990,  -3248, -3248,  -3499, -3499,  -3742, -3742,
-    -3977, -3977,  -4204, -4204,  -4423, -4423,  -4633, -4633,  -4835, -4835,
-    -5028, -5028,  -5212, -5212,  -5388, -5388,  -5554, -5554,  -5711, -5711,
-    -5859, -5859,  -5997, -5997,  -6126, -6126,  -6245, -6245,  -6355, -6355,
-    -6455, -6455,  -6545, -6545,  -6626, -6626,  -6697, -6697,  -6758, -6758,
-    -6809, -6809,  -6850, -6850,  -6881, -6881,  -6902, -6902,  -6912, -6912,
-    -6913, -6913,  -6903, -6903,  -6883, -6883,  -6853, -6853,  -6813, -6813,
-    -6763, -6763,  -6703, -6703,  -6633, -6633,  -6553, -6553,  -6464, -6464,
-    -6365, -6365,  -6257, -6257,  -6140, -6140,  -6014, -6014,  -5879, -5879,
-    -5736, -5736,  -5584, -5584 // Note: Last sample pair omitted slightly to fit 128 points exactly starting from 0
-};
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -136,6 +98,18 @@ DMA_HandleTypeDef hdma_sai2_b;
 SPI_HandleTypeDef hspi3;
 
 /* USER CODE BEGIN PV */
+// --- Global or Static Buffer ---
+// Buffer needs to hold exactly ONE stereo sample pair (Left, Right).
+// Must be accessible by DMA (global or static).
+int32_t single_value_dma_buffer[2]; // Size is 2 for L/R pair
+
+// Global buffer to capture ADC data from SAI
+int32_t audioRxBuffer[AUDIO_BUFFER_SIZE * 8];
+int32_t audioTxBuffer[AUDIO_BUFFER_SIZE * 2];
+uint8_t dataReadyFlag = 0;
+
+
+int32_t triangleBuffer[TRIANGLE_BUFFER_SIZE * 2];
 
 /* USER CODE END PV */
 
@@ -175,96 +149,13 @@ void I2C_Scan(I2C_HandleTypeDef *hi2c)
         // Try up to 3 times with a small timeout.
         res = HAL_I2C_IsDeviceReady(hi2c, addr << 1, 3, 10);
         if (res == HAL_OK) {
-            sprintf(msg, "Device found at 0x%02X\r\n", addr);
+            sprintf(msg, "Device found at 0x%02X\r\n", addr << 1);
             // You can send this message over UART, SWV, or your debugger console.
             printf("%s", msg);
         }
     }
 }
 
-// Stereo 16-bit, so total array size = SINE_SAMPLES * 2
-int16_t sineTable[SINE_SAMPLES * 2];
-
-void GenerateSineWaveTable(int16_t amplitude)
-{
-    // --- Input Validation ---
-    // Ensure amplitude is within valid int16_t positive range
-    if (amplitude > MAX_AMPLITUDE_16BIT) {
-        amplitude = MAX_AMPLITUDE_16BIT;
-        // Consider adding a printf warning here if debugging is enabled
-    }
-    if (amplitude < 0) {
-        // Amplitude should represent the peak, make it positive.
-        amplitude = 0;
-         // Consider adding a printf warning here if debugging is enabled
-    }
-
-    // --- Calculations ---
-    // Use float for intermediate calculations to maintain precision
-    float amplitude_f = (float)amplitude;
-    const float twoPi = 2.0f * (float)M_PI;
-    // Calculate the angle step needed for each sample point in the table
-    const float phaseIncrement = twoPi / (float)SINE_SAMPLES;
-
-    // --- Table Population ---
-    for (int i = 0; i < SINE_SAMPLES; i++)
-    {
-        // 1. Calculate the angle for this sample point (0 to 2*PI)
-        float angle = phaseIncrement * (float)i;
-
-        // 2. Calculate the sine value (-1.0 to +1.0) and scale by amplitude
-        float sampleValue_f = sinf(angle) * amplitude_f;
-
-        // 3. **CRITICAL: Clamp** the float value to the int16_t range BEFORE casting.
-        //    This prevents wrap-around artifacts from floating point inaccuracies.
-        if (sampleValue_f >= (float)MAX_AMPLITUDE_16BIT) {
-             sampleValue_f = (float)MAX_AMPLITUDE_16BIT; // Clamp to max positive
-        } else if (sampleValue_f <= (float)MIN_AMPLITUDE_16BIT) {
-             sampleValue_f = (float)MIN_AMPLITUDE_16BIT; // Clamp to max negative
-        }
-
-        // 4. Cast the clamped float value to the target signed integer type.
-        //    This preserves the sign and centers the wave around 0.
-        int16_t sample = (int16_t)sampleValue_f;
-
-        // 5. --- Stereo Interleaving (Mono Output) ---
-        //    Write the same signed sample to both Left and Right channels
-        sineTable[i * 2 + 0] = sample; // Left channel sample for time point i
-        sineTable[i * 2 + 1] = sample; // Right channel sample for time point i
-    }
-    // Optional: Add a printf here to indicate table generation is complete if needed
-    // printf("Sine wave table generated.\n");
-}
-
-static void fill_buffer_with_square_wave(int32_t *buf, uint32_t num_samples)
-{
-    // Fill up a 100 Hz square wave
-    // 44.1 kHz sample rate -> 441 samples in 100 Hz -> toggle every 220 samples
-    int toggle_period = 440;
-    int count = 0;
-    int wave_state = 1;
-    int32_t magnitude = 8000000;
-
-    for(int i = 0; i < num_samples; i++)
-    {
-        buf[i] = magnitude * wave_state;
-        count++;
-        if(count >= toggle_period)
-        {
-            count = 0;
-            wave_state = wave_state * (-1); // toggle
-        }
-    }
-}
-
-static void fill_buffer_with_triangle_wave(int32_t *buf, uint32_t num_samples)
-{
-	for (int32_t i = 0; i < num_samples; i++)
-	{
-		buf[(i)*2] = (i*1000);
-		buf[(i)*2+1] = (i*1000);
-	}
-}
 
 
 HAL_StatusTypeDef ADC_INIT() {
@@ -313,6 +204,8 @@ HAL_StatusTypeDef ADC_INIT() {
 	uint8_t adc_select_2L = 0x42; // SET ADC_2_L source to VIN2L??
   uint8_t adc_select_2R = 0x42; // SET ADC_2_R source to VIN2R??
 
+  
+
 
   // Set ADC1 input sources
 	status = HAL_I2C_Mem_Write(&hi2c4, // Set ADC1 source
@@ -345,6 +238,10 @@ HAL_StatusTypeDef ADC_INIT() {
 		            1,                    // Writing 1 byte
 		            100);
 
+  // adc_select_1L = 0x00; // SET ADC_1_L source to VIN1L
+  // adc_select_1R = 0x00; // SET ADC_1_R source to VIN1R
+  // adc_select_2L = 0x00; // SET ADC_2_L source to VIN2L??
+  // adc_select_2R = 0x00; // SET ADC_2_R source to VIN2R??
   // Set ADC2 input sources
 	status = HAL_I2C_Mem_Write(&hi2c4, // Set ADC1 source
 	            PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
@@ -514,6 +411,77 @@ HAL_StatusTypeDef ADC_INIT() {
 		            &regRead2,
 		            1,                    // Writing 1 byte
 		            100);
+
+
+
+  uint8_t gain_config = 0x18; // 12 dB gain
+
+  status = HAL_I2C_Mem_Write(&hi2c4, // Set gain
+                PCM1865_I2C_ADDR,     // 7-bit device address << 1
+          PCM1865_PGA_VAL_CH1_L,                 // Register 0x00 is the page-select register
+                I2C_MEMADD_SIZE_8BIT,
+                &gain_config,
+                1,                    // Writing 1 byte
+                100);
+
+  status = HAL_I2C_Mem_Write(&hi2c4,
+                PCM1865_I2C_ADDR,     // 7-bit device address << 1
+          PCM1865_PGA_VAL_CH1_R,                 // Register 0x00 is the page-select register
+                I2C_MEMADD_SIZE_8BIT,
+                &gain_config,
+                1,                    // Writing 1 byte
+                100);
+
+                status = HAL_I2C_Mem_Write(&hi2c4, // Set gain
+                  PCM1865_I2C_ADDR,     // 7-bit device address << 1
+            PCM1865_PGA_VAL_CH2_L,                 // Register 0x00 is the page-select register
+                  I2C_MEMADD_SIZE_8BIT,
+                  &gain_config,
+                  1,                    // Writing 1 byte
+                  100);
+  
+    status = HAL_I2C_Mem_Write(&hi2c4,
+                  PCM1865_I2C_ADDR,     // 7-bit device address << 1
+            PCM1865_PGA_VAL_CH2_R,                 // Register 0x00 is the page-select register
+                  I2C_MEMADD_SIZE_8BIT,
+                  &gain_config,
+                  1,                    // Writing 1 byte
+                  100);
+
+      // Set gain for second ADC
+  status = HAL_I2C_Mem_Write(&hi2c4, // Set gain
+                PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
+          PCM1865_PGA_VAL_CH1_L,                 // Register 0x00 is the page-select register
+                I2C_MEMADD_SIZE_8BIT,
+                &gain_config,
+                1,                    // Writing 1 byte
+                100);
+
+  status = HAL_I2C_Mem_Write(&hi2c4, // Set gain
+    PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
+PCM1865_PGA_VAL_CH1_R,                 // Register 0x00 is the page-select register
+    I2C_MEMADD_SIZE_8BIT,
+    &gain_config,
+    1,                    // Writing 1 byte
+    100);
+
+    status = HAL_I2C_Mem_Write(&hi2c4, // Set gain
+      PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
+PCM1865_PGA_VAL_CH2_L,                 // Register 0x00 is the page-select register
+      I2C_MEMADD_SIZE_8BIT,
+      &gain_config,
+      1,                    // Writing 1 byte
+      100);
+
+    status = HAL_I2C_Mem_Write(&hi2c4, // Set gain
+    PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
+    PCM1865_PGA_VAL_CH2_R,                 // Register 0x00 is the page-select register
+    I2C_MEMADD_SIZE_8BIT,
+    &gain_config,
+    1,                    // Writing 1 byte
+    100);
+  
+    
 	printf("adc init complete\r\n");
 	printf("clk config1 (hex): %x\r\n", regRead1);
 	printf("clk config2 (hex): %x\r\n", regRead2);
@@ -533,6 +501,7 @@ HAL_StatusTypeDef ADC_INIT() {
 	return status;
 
 }
+
 
 
 // Buffers to store register values
@@ -632,25 +601,124 @@ void read_pcm1865_registers(void) {
 
 volatile uint8_t bufferFull = 0;
 
-void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
-{
-    // This callback is invoked when the DMA finishes a full buffer transfer.
-    // You can process the data here, or set a flag for your main loop.
-    printf("Full buffer received\r\n");
-    bufferFull = 1;
-    for (int i = 0; i < AUDIO_BUFFER_SIZE; i++)
-          {
-              printf("Sample %d: %d\r\n", i, audioRxBuffer[i] >> 8);
-          }
-
-    HAL_SAI_DMAPause(&hsai_BlockB1);
-}
-
 void HAL_SAI_RxHalfCpltCallback(SAI_HandleTypeDef *hsai)
 {
     // Called at half buffer, useful for double-buffered processing.
 //    printf("Half buffer received\r\n");
+  ProcessAudioChunk(&audioRxBuffer[0], TDM_RX_HALF_SIZE, &audioTxBuffer[0], STEREO_TX_HALF_SIZE);
 }
+
+void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
+{
+    // This callback is invoked when the DMA finishes a full buffer transfer.
+    // You can process the data here, or set a flag for your main loop.
+    // printf("Full buffer received\r\n");
+    ProcessAudioChunk(&audioRxBuffer[TDM_RX_HALF_SIZE], TDM_RX_HALF_SIZE, &audioTxBuffer[STEREO_TX_HALF_SIZE], STEREO_TX_HALF_SIZE);
+    bufferFull = 1;
+    // for (int i = 0; i < AUDIO_BUFFER_SIZE; i++)
+    //       {
+    //         if (i % 8 == 0) {
+    //           printf("Sample %d: %d\r\n", i, audioRxBuffer[i] >> 8);
+    //       }
+    //     }
+      
+    // HAL_SAI_DMAPause(&hsai_BlockB1);
+}
+
+
+// void ProcessAudioChunk(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples, int32_t* tx_chunk_start, uint32_t tx_chunk_num_stereo_samples)
+// {
+//   // rx_chunk_num_samples will be TDM_RX_HALF_SIZE
+//   // tx_chunk_num_stereo_samples will be STEREO_TX_HALF_SIZE
+
+//   // Calculate how many 'frames' of 8 channels are in the RX chunk
+//   uint32_t num_frames = rx_chunk_num_samples / TDM_SLOTS; // e.g., 4096 / 8 = 512
+
+//   for (uint32_t frame = 0; frame < num_frames; ++frame) {
+//     int32_t sum = 0; // Use 32-bit accumulator to prevent overflow
+
+//     // Calculate the starting index for this frame in the RX chunk
+//     uint32_t rx_frame_start_index = frame * TDM_SLOTS;
+
+//     // 1. Sum the 8 channels for this time point
+//     for (int ch = 0; ch < 1; ++ch) {
+//     // for (int ch = 0; ch < TDM_SLOTS; ++ch) {
+//     sum += (int32_t)rx_chunk_start[rx_frame_start_index + ch] >> 8; // Right shift to convert to 24-bit
+//     }
+
+//     // 2. Optional: Scale/Average/Clip the sum
+//     //    - Simple Averaging: sum /= TDM_SLOTS;
+//     //    - Scaling: sum = (int32_t)((float)sum * 0.125f); // Scale by 1/8
+//     //    - Clipping is crucial to prevent wrap-around!
+//     int32_t output_sample;
+//     // sum /= TDM_SLOTS; // Example: Average
+//     if (sum > MAX_AMPLITUDE_24BIT) output_sample = MAX_AMPLITUDE_24BIT;
+//     else if (sum < MIN_AMPLITUDE_24BIT) output_sample = MIN_AMPLITUDE_24BIT;
+//     else output_sample = (int32_t)sum;
+
+
+//     // 3. Write the result to the corresponding stereo output position
+//     //    Each RX frame corresponds to one L/R pair in the TX chunk
+//     uint32_t tx_pair_start_index = frame * STEREO_CHANNELS; // frame * 2
+//     tx_chunk_start[tx_pair_start_index + 0] = output_sample; // Left
+//     tx_chunk_start[tx_pair_start_index + 1] = output_sample; // Right (same for mono sum)
+// }
+// }
+
+void ProcessAudioChunk(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
+  int32_t* tx_chunk_start, uint32_t tx_chunk_num_stereo_samples)
+{
+// rx_chunk_num_samples will be TDM_RX_HALF_SIZE (e.g., 4096)
+// tx_chunk_num_stereo_samples will be STEREO_TX_HALF_SIZE (e.g., 1024)
+
+// Calculate how many 'frames' of TDM_SLOTS channels are in the RX chunk
+uint32_t num_frames = rx_chunk_num_samples / TDM_SLOTS; // e.g., 4096 / 8 = 512
+
+// Pre-calculate scaling factor (more efficient)
+// const float scaling_factor = 1.0f / (float)TDM_SLOTS;
+const float scaling_factor = 1.0f;;
+
+for (uint32_t frame = 0; frame < num_frames; ++frame) {
+int32_t sum = 0; // Use 32-bit accumulator
+
+// Calculate the starting index for this frame in the RX chunk
+uint32_t rx_frame_start_index = frame * TDM_SLOTS;
+
+// 1. Sum the 8 channels for this time point
+// --- FIX: Loop limit corrected to TDM_SLOTS ---
+for (int ch = 0; ch < TDM_SLOTS; ++ch) {
+// --- FIX: Removed incorrect right shift ---
+// Assuming rx_chunk_start[idx] already contains the correct 24-bit value
+// within the int32_t (e.g., left-justified or sign-extended)
+sum += rx_chunk_start[rx_frame_start_index + ch] >> 8; // Right shift to convert to 24-bit
+}
+
+// 2. Scale and Clip the sum
+// --- RECOMMENDATION: Using float scaling ---
+float scaled_sum_f = (float)sum * scaling_factor;
+int32_t output_sample; // This will hold the final 24-bit value
+
+// Clip the scaled value
+if (scaled_sum_f >= (float)MAX_AMPLITUDE_24BIT + 0.999f) { // Add tolerance for float representation
+output_sample = MAX_AMPLITUDE_24BIT;
+} else if (scaled_sum_f <= (float)MIN_AMPLITUDE_24BIT - 0.999f) {
+output_sample = MIN_AMPLITUDE_24BIT;
+} else {
+// Cast the scaled float back to int32_t
+// Optional rounding could be added here: e.g., using roundf() from math.h
+output_sample = (int32_t)scaled_sum_f;
+}
+
+// 3. Write the result to the corresponding stereo output position
+uint32_t tx_pair_start_index = frame * STEREO_CHANNELS; // frame * 2
+
+// --- FIX: Left-shift output sample for standard 24-bit SAI formats (I2S, LJ) ---
+// Assuming the DAC/SAI TX expects data in the MSBs of the 32-bit word
+tx_chunk_start[tx_pair_start_index + 0] = output_sample; // Left
+tx_chunk_start[tx_pair_start_index + 1] = output_sample; // Right (same for mono sum)
+}
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -776,13 +844,21 @@ timeout = 0xFFFF;
   	  	  printf("HAL_SAI_Transmit_DMA failed A1\r\n");
   	  	  error = HAL_SAI_GetError(&hsai_BlockA1);
         }
-  if (HAL_SAI_Receive_DMA(&hsai_BlockB1, &audioRxBuffer, AUDIO_BUFFER_SIZE) != HAL_OK)
+  if (HAL_SAI_Receive_DMA(&hsai_BlockB1, &audioRxBuffer, AUDIO_BUFFER_SIZE * 8) != HAL_OK)
       {
           // Handle error if needed
 	  	  printf("HAL_SAI_Receive_DMA failed B1\r\n");
 	  	  error = HAL_SAI_GetError(&hsai_BlockB1);
       }
 
+  if (HAL_SAI_Transmit_DMA(&hsai_BlockB2, (uint8_t*)audioTxBuffer, AUDIO_BUFFER_SIZE * 2) != HAL_OK)
+  {
+    // Handle error (e.g., call Error_Handler())
+    printf("HAL_SAI_Receive_DMA2 failed\r\n");
+//          error = HAL_SAI_GetError(&hsai_BlockB2);
+
+//          while(1);
+  }
 //
 //  GenerateSineWaveTable(15000);
 
@@ -826,16 +902,16 @@ timeout = 0xFFFF;
 ////          while(1);
 //      }
 //
-  fill_buffer_with_triangle_wave(triangleBuffer, TRIANGLE_BUFFER_SIZE);
+//   fill_buffer_with_triangle_wave(triangleBuffer, TRIANGLE_BUFFER_SIZE);
 
-  if (HAL_SAI_Transmit_DMA(&hsai_BlockB2, (uint8_t*)triangleBuffer, TRIANGLE_BUFFER_SIZE * 2) != HAL_OK)
-      {
-          // Handle error (e.g., call Error_Handler())
-          printf("HAL_SAI_Receive_DMA2 failed\r\n");
-//          error = HAL_SAI_GetError(&hsai_BlockB2);
+//   if (HAL_SAI_Transmit_DMA(&hsai_BlockB2, (uint8_t*)triangleBuffer, TRIANGLE_BUFFER_SIZE * 2) != HAL_OK)
+//       {
+//           // Handle error (e.g., call Error_Handler())
+//           printf("HAL_SAI_Receive_DMA2 failed\r\n");
+// //          error = HAL_SAI_GetError(&hsai_BlockB2);
 
-//          while(1);
-      }
+// //          while(1);
+//       }
 
 //  single_value_dma_buffer[0] = DC_VALUE_TO_TRANSMIT; // Left Channel
 //      single_value_dma_buffer[1] = DC_VALUE_TO_TRANSMIT; // Right Channel
