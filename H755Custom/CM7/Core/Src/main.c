@@ -22,7 +22,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "stdio.h"
-
+#include "pcm1865.h"
+#include "audio_dsp.h"      // For initializing and controlling the DSP engine
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -44,36 +45,34 @@
 #define MIN_AMPLITUDE_16BIT (-32768)
 #define MAX_AMPLITUDE_24BIT (8388607)
 #define MIN_AMPLITUDE_24BIT (-8388608)
-// #define MAX_AMPLITUDE_24BIT (4150000)
-// #define MIN_AMPLITUDE_24BIT (-4150000)
+
 #define TDM_SLOTS 8
 #define STEREO_CHANNELS 2
 #define TDM_RX_HALF_SIZE 2048
 #define STEREO_TX_HALF_SIZE 512
 
-#define PCM1865_I2C_ADDR   0x94   // Adjust this based on your hardware strap
-#define PCM1865_I2C_ADDR_2   0x96   // Adjust this based on your hardware strap
-#define SINE_SAMPLES 440
 
-#define PCM1865_RESET               (0x00)
-#define PCM1865_PGA_VAL_CH1_L       (0x01)
-#define PCM1865_PGA_VAL_CH1_R       (0x02)
-#define PCM1865_PGA_VAL_CH2_L       (0x03)
-#define PCM1865_PGA_VAL_CH2_R       (0x04)
-#define PCM1865_ADC1_IP_SEL_L       (0x06) // Select input to route to ADC1 left input.
-#define PCM1865_ADC1_IP_SEL_R       (0x07) // Select input to route to ADC1 right input.
-#define PCM1865_ADC2_IP_SEL_L       (0x08) // Select input to route to ADC2 left input.
-#define PCM1865_ADC2_IP_SEL_R       (0x09) // Select input to route to ADC2 right input.
-#define PCM1865_FMT                 (0x0B) // RX_WLEN, TDM_LRCLK_MODE, TX_WLEN, FMT
-#define PCM1865_TDM_OSEL            (0x0C)
-#define PCM1865_TX_TDM_OFFSET       (0x0D)
-#define PCM1865_CLK_CFG0            (0x20) // Basic clock config.
-#define PCM1865_PLL_STATE			(0x28)
-#define PCM1865_PWR_STATE           (0x70) // Power down, Sleep, Standby
-#define PCM1865_PGA_VAL_CH1_L       (0x01)
-#define PCM1865_PGA_VAL_CH1_R       (0x02)
-#define PCM1865_PGA_VAL_CH2_L       (0x03)
-#define PCM1865_PGA_VAL_CH2_R       (0x04)
+
+
+// #define PCM1865_RESET               (0x00)
+// #define PCM1865_PGA_VAL_CH1_L       (0x01)
+// #define PCM1865_PGA_VAL_CH1_R       (0x02)
+// #define PCM1865_PGA_VAL_CH2_L       (0x03)
+// #define PCM1865_PGA_VAL_CH2_R       (0x04)
+// #define PCM1865_ADC1_IP_SEL_L       (0x06) // Select input to route to ADC1 left input.
+// #define PCM1865_ADC1_IP_SEL_R       (0x07) // Select input to route to ADC1 right input.
+// #define PCM1865_ADC2_IP_SEL_L       (0x08) // Select input to route to ADC2 left input.
+// #define PCM1865_ADC2_IP_SEL_R       (0x09) // Select input to route to ADC2 right input.
+// #define PCM1865_FMT                 (0x0B) // RX_WLEN, TDM_LRCLK_MODE, TX_WLEN, FMT
+// #define PCM1865_TDM_OSEL            (0x0C)
+// #define PCM1865_TX_TDM_OFFSET       (0x0D)
+// #define PCM1865_CLK_CFG0            (0x20) // Basic clock config.
+// #define PCM1865_PLL_STATE			(0x28)
+// #define PCM1865_PWR_STATE           (0x70) // Power down, Sleep, Standby
+// #define PCM1865_PGA_VAL_CH1_L       (0x01)
+// #define PCM1865_PGA_VAL_CH1_R       (0x02)
+// #define PCM1865_PGA_VAL_CH2_L       (0x03)
+// #define PCM1865_PGA_VAL_CH2_R       (0x04)
 #define DC_VALUE_TO_TRANSMIT ((int32_t)500000) << 8 // Example: Output a positive DC level
 
 
@@ -109,8 +108,6 @@ int32_t audioTxBuffer[AUDIO_BUFFER_SIZE * 2];
 uint8_t dataReadyFlag = 0;
 
 
-int32_t triangleBuffer[TRIANGLE_BUFFER_SIZE * 2];
-
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -140,465 +137,6 @@ int _write(int le, char *ptr, int len)
     return len;
     }
 
-void I2C_Scan(I2C_HandleTypeDef *hi2c)
-{
-    char msg[64];
-    HAL_StatusTypeDef res;
-    // I2C addresses are 7-bit. The HAL function expects the 7-bit address shifted left by 1.
-    for (uint8_t addr = 1; addr < 128; addr++) {
-        // Try up to 3 times with a small timeout.
-        res = HAL_I2C_IsDeviceReady(hi2c, addr << 1, 3, 10);
-        if (res == HAL_OK) {
-            sprintf(msg, "Device found at 0x%02X\r\n", addr << 1);
-            // You can send this message over UART, SWV, or your debugger console.
-            printf("%s", msg);
-        }
-    }
-}
-
-
-
-HAL_StatusTypeDef ADC_INIT() {
-	HAL_StatusTypeDef status;
-
-	uint8_t regRead1, regRead2;
-
-	uint8_t reset = 0xFE;
-	status = HAL_I2C_Mem_Write(&hi2c4, // reset
-            PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
-            0x00,                 // Register 0x00 is the page-select register
-            I2C_MEMADD_SIZE_8BIT,
-            &reset,
-            1,                    // Writing 1 byte
-            100);
-	status = HAL_I2C_Mem_Write(&hi2c4, // Reset
-	            PCM1865_I2C_ADDR,     // 7-bit device address << 1
-	            0x00,                 // Register 0x00 is the page-select register
-	            I2C_MEMADD_SIZE_8BIT,
-	            &reset,
-	            1,                    // Writing 1 byte
-	            100);
-	// status = HAL_I2C_Mem_Read(&hi2c4, // Read
-	//             PCM1865_I2C_ADDR,     // 7-bit device address << 1
-	//             0x00,                 // Register 0x00 is the page-select register
-	//             I2C_MEMADD_SIZE_8BIT,
-	//             &regRead1,
-	//             1,                    // Writing 1 byte
-	//             100);
-
-	// status = HAL_I2C_Mem_Read(&hi2c4, // Read
-	// 	            PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
-	// 	            0x00,                 // Register 0x00 is the page-select register
-	// 	            I2C_MEMADD_SIZE_8BIT,
-	// 	            &regRead2,
-	// 	            1,                    // Writing 1 byte
-	// 	            100);
-
-	// printf("page register 1: %x\r\n", regRead1);
-	// printf("page register 2: %x\r\n", regRead2);
-
-
-
-  uint8_t adc_select_1L = 0x41; // SET ADC_1_L source to VIN1L
-  uint8_t adc_select_1R = 0x41; // SET ADC_1_R source to VIN1R
-	uint8_t adc_select_2L = 0x42; // SET ADC_2_L source to VIN2L??
-  uint8_t adc_select_2R = 0x42; // SET ADC_2_R source to VIN2R??
-
-  
-
-
-  // Set ADC1 input sources
-	status = HAL_I2C_Mem_Write(&hi2c4, // Set ADC1 source
-	            PCM1865_I2C_ADDR,     // 7-bit device address << 1
-				PCM1865_ADC1_IP_SEL_L,                 // Register 0x00 is the page-select register
-	            I2C_MEMADD_SIZE_8BIT,
-	            &adc_select_1L,
-	            1,                    // Writing 1 byte
-	            100);
-	status = HAL_I2C_Mem_Write(&hi2c4,
-		            PCM1865_I2C_ADDR,     // 7-bit device address << 1
-					PCM1865_ADC1_IP_SEL_L,                 // Register 0x00 is the page-select register
-		            I2C_MEMADD_SIZE_8BIT,
-		            &adc_select_1R,
-		            1,                    // Writing 1 byte
-		            100);
-
-  status = HAL_I2C_Mem_Write(&hi2c4, // Set ADC1 source
-	            PCM1865_I2C_ADDR,     // 7-bit device address << 1
-				PCM1865_ADC2_IP_SEL_L,                 // Register 0x00 is the page-select register
-	            I2C_MEMADD_SIZE_8BIT,
-	            &adc_select_2L,
-	            1,                    // Writing 1 byte
-	            100);
-	status = HAL_I2C_Mem_Write(&hi2c4,
-		            PCM1865_I2C_ADDR,     // 7-bit device address << 1
-					PCM1865_ADC2_IP_SEL_L,                 // Register 0x00 is the page-select register
-		            I2C_MEMADD_SIZE_8BIT,
-		            &adc_select_2R,
-		            1,                    // Writing 1 byte
-		            100);
-
-  // adc_select_1L = 0x00; // SET ADC_1_L source to VIN1L
-  // adc_select_1R = 0x00; // SET ADC_1_R source to VIN1R
-  // adc_select_2L = 0x00; // SET ADC_2_L source to VIN2L??
-  // adc_select_2R = 0x00; // SET ADC_2_R source to VIN2R??
-  // Set ADC2 input sources
-	status = HAL_I2C_Mem_Write(&hi2c4, // Set ADC1 source
-	            PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
-				PCM1865_ADC1_IP_SEL_L,                 // Register 0x00 is the page-select register
-	            I2C_MEMADD_SIZE_8BIT,
-	            &adc_select_1L,
-	            1,                    // Writing 1 byte
-	            100);
-	status = HAL_I2C_Mem_Write(&hi2c4,
-		            PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
-					PCM1865_ADC1_IP_SEL_L,                 // Register 0x00 is the page-select register
-		            I2C_MEMADD_SIZE_8BIT,
-		            &adc_select_1R,
-		            1,                    // Writing 1 byte
-		            100);
-
-  status = HAL_I2C_Mem_Write(&hi2c4, // Set ADC1 source
-	            PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
-				PCM1865_ADC2_IP_SEL_L,                 // Register 0x00 is the page-select register
-	            I2C_MEMADD_SIZE_8BIT,
-	            &adc_select_2L,
-	            1,                    // Writing 1 byte
-	            100);
-	status = HAL_I2C_Mem_Write(&hi2c4,
-		            PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
-					PCM1865_ADC2_IP_SEL_L,                 // Register 0x00 is the page-select register
-		            I2C_MEMADD_SIZE_8BIT,
-		            &adc_select_2R,
-		            1,                    // Writing 1 byte
-		            100);
-
-  
-	// status = HAL_I2C_Mem_Read(&hi2c4, // Set ADC2 source
-	// 	            PCM1865_I2C_ADDR,     // 7-bit device address << 1
-	// 				PCM1865_ADC2_IP_SEL_L,                 // Register 0x00 is the page-select register
-	// 	            I2C_MEMADD_SIZE_8BIT,
-	// 	            &regRead1,
-	// 	            1,                    // Writing 1 byte
-	// 	            100);
-	// 	status = HAL_I2C_Mem_Read(&hi2c4,
-	// 		            PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
-	// 					PCM1865_ADC2_IP_SEL_L,                 // Register 0x00 is the page-select register
-	// 		            I2C_MEMADD_SIZE_8BIT,
-	// 		            &regRead2,
-	// 		            1,                    // Writing 1 byte
-	// 		            100);
-
-		printf("adc2 input select 1: %x\r\n", regRead1);
-			printf("adc2 input select 2: %x\r\n", regRead2);
-
-
-
-	uint8_t tdm_offset_1 = 0;
-	uint8_t tdm_offset_2 = 128;
-
-	status = HAL_I2C_Mem_Write(&hi2c4, // Set TDM offset
-		            PCM1865_I2C_ADDR,     // 7-bit device address << 1
-					PCM1865_TX_TDM_OFFSET ,                 // Register 0x00 is the page-select register
-		            I2C_MEMADD_SIZE_8BIT,
-		            &tdm_offset_1,
-		            1,                    // Writing 1 byte
-		            100);
-
-	status = HAL_I2C_Mem_Write(&hi2c4,
-					PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
-					PCM1865_TX_TDM_OFFSET ,                 // Register 0x00 is the page-select register
-					I2C_MEMADD_SIZE_8BIT,
-					&tdm_offset_2,
-					1,                    // Writing 1 byte
-					100);
-
-	status = HAL_I2C_Mem_Read(&hi2c4, // Set TDM offset
-		            PCM1865_I2C_ADDR,     // 7-bit device address << 1
-					PCM1865_TX_TDM_OFFSET ,                 // Register 0x00 is the page-select register
-		            I2C_MEMADD_SIZE_8BIT,
-		            &regRead1,
-		            1,                    // Writing 1 byte
-		            100);
-
-	status = HAL_I2C_Mem_Read(&hi2c4,
-					PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
-					PCM1865_TX_TDM_OFFSET ,                 // Register 0x00 is the page-select register
-					I2C_MEMADD_SIZE_8BIT,
-					&regRead2,
-					1,                    // Writing 1 byte
-					100);
-
-	printf("tdm offset select 1: %x\r\n", regRead1);
-	printf("tdm offset select 2: %x\r\n", regRead2);
-
-
-
-
-	uint8_t tdm_mode = 0x43;
-
-	status = HAL_I2C_Mem_Write(&hi2c4, // Set TDM mode, 0x0B
-			            PCM1865_I2C_ADDR,     // 7-bit device address << 1
-						PCM1865_FMT,                 // Register 0x00 is the page-select register
-			            I2C_MEMADD_SIZE_8BIT,
-			            &tdm_mode,
-			            1,                    // Writing 1 byte
-			            100);
-	status = HAL_I2C_Mem_Write(&hi2c4,
-					PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
-					PCM1865_FMT,                 // Register 0x00 is the page-select register
-					I2C_MEMADD_SIZE_8BIT,
-					&tdm_mode,
-					1,                    // Writing 1 byte
-					100);
-
-
-
-
-
-	uint8_t tdm_channels = 1;   // 0x0C
-
-	status = HAL_I2C_Mem_Write(&hi2c4, // Set 4 channel TDM
-				            PCM1865_I2C_ADDR,     // 7-bit device address << 1
-							PCM1865_TDM_OSEL,                 // Register 0x00 is the page-select register
-				            I2C_MEMADD_SIZE_8BIT,
-				            &tdm_channels,
-				            1,                    // Writing 1 byte
-				            100);
-	status = HAL_I2C_Mem_Write(&hi2c4,
-					PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
-					PCM1865_TDM_OSEL ,                 // Register 0x00 is the page-select register
-					I2C_MEMADD_SIZE_8BIT,
-					&tdm_channels,
-					1,                    // Writing 1 byte
-					100);
-
-
-
-
-
-	uint8_t clock_config = 0x01; // Set clock config to auto
-
-		status = HAL_I2C_Mem_Write(&hi2c4,
-					            PCM1865_I2C_ADDR,     // 7-bit device address << 1
-								PCM1865_CLK_CFG0,                 // Register 0x00 is the page-select register
-					            I2C_MEMADD_SIZE_8BIT,
-					            &clock_config,
-					            1,                    // Writing 1 byte
-					            100);
-		status = HAL_I2C_Mem_Write(&hi2c4,
-						PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
-						PCM1865_CLK_CFG0 ,                 // Register 0x00 is the page-select register
-						I2C_MEMADD_SIZE_8BIT,
-						&clock_config,
-						1,                    // Writing 1 byte
-						100);
-
-
-
-		status = HAL_I2C_Mem_Read(&hi2c4, // Read
-				            PCM1865_I2C_ADDR,     // 7-bit device address << 1
-							PCM1865_CLK_CFG0,                 // Register 0x00 is the page-select register
-				            I2C_MEMADD_SIZE_8BIT,
-				            &regRead1,
-				            1,                    // Writing 1 byte
-				            100);
-
-	status = HAL_I2C_Mem_Read(&hi2c4, // Read
-		            PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
-					PCM1865_CLK_CFG0,                 // Register 0x00 is the page-select register
-		            I2C_MEMADD_SIZE_8BIT,
-		            &regRead2,
-		            1,                    // Writing 1 byte
-		            100);
-
-
-
-  uint8_t gain_config = 0x18; // 12 dB gain
-
-  status = HAL_I2C_Mem_Write(&hi2c4, // Set gain
-                PCM1865_I2C_ADDR,     // 7-bit device address << 1
-          PCM1865_PGA_VAL_CH1_L,                 // Register 0x00 is the page-select register
-                I2C_MEMADD_SIZE_8BIT,
-                &gain_config,
-                1,                    // Writing 1 byte
-                100);
-
-  status = HAL_I2C_Mem_Write(&hi2c4,
-                PCM1865_I2C_ADDR,     // 7-bit device address << 1
-          PCM1865_PGA_VAL_CH1_R,                 // Register 0x00 is the page-select register
-                I2C_MEMADD_SIZE_8BIT,
-                &gain_config,
-                1,                    // Writing 1 byte
-                100);
-
-                status = HAL_I2C_Mem_Write(&hi2c4, // Set gain
-                  PCM1865_I2C_ADDR,     // 7-bit device address << 1
-            PCM1865_PGA_VAL_CH2_L,                 // Register 0x00 is the page-select register
-                  I2C_MEMADD_SIZE_8BIT,
-                  &gain_config,
-                  1,                    // Writing 1 byte
-                  100);
-  
-    status = HAL_I2C_Mem_Write(&hi2c4,
-                  PCM1865_I2C_ADDR,     // 7-bit device address << 1
-            PCM1865_PGA_VAL_CH2_R,                 // Register 0x00 is the page-select register
-                  I2C_MEMADD_SIZE_8BIT,
-                  &gain_config,
-                  1,                    // Writing 1 byte
-                  100);
-
-      // Set gain for second ADC
-  status = HAL_I2C_Mem_Write(&hi2c4, // Set gain
-                PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
-          PCM1865_PGA_VAL_CH1_L,                 // Register 0x00 is the page-select register
-                I2C_MEMADD_SIZE_8BIT,
-                &gain_config,
-                1,                    // Writing 1 byte
-                100);
-
-  status = HAL_I2C_Mem_Write(&hi2c4, // Set gain
-    PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
-PCM1865_PGA_VAL_CH1_R,                 // Register 0x00 is the page-select register
-    I2C_MEMADD_SIZE_8BIT,
-    &gain_config,
-    1,                    // Writing 1 byte
-    100);
-
-    status = HAL_I2C_Mem_Write(&hi2c4, // Set gain
-      PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
-PCM1865_PGA_VAL_CH2_L,                 // Register 0x00 is the page-select register
-      I2C_MEMADD_SIZE_8BIT,
-      &gain_config,
-      1,                    // Writing 1 byte
-      100);
-
-    status = HAL_I2C_Mem_Write(&hi2c4, // Set gain
-    PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
-    PCM1865_PGA_VAL_CH2_R,                 // Register 0x00 is the page-select register
-    I2C_MEMADD_SIZE_8BIT,
-    &gain_config,
-    1,                    // Writing 1 byte
-    100);
-  
-    
-	printf("adc init complete\r\n");
-	printf("clk config1 (hex): %x\r\n", regRead1);
-	printf("clk config2 (hex): %x\r\n", regRead2);
-
-
-
-	// Set PLL
-	uint8_t PLL_config = 0x01; // Set clock config to auto
-
-//			status = HAL_I2C_Mem_Write(&hi2c4,
-//						            PCM1865_I2C_ADDR,     // 7-bit device address << 1
-//									PCM1865_PLL_STATE,                 // Register 0x00 is the page-select register
-//						            I2C_MEMADD_SIZE_8BIT,
-//						            &PLL_config,
-//						            1,                    // Writing 1 byte
-//						            100);
-	return status;
-
-}
-
-
-
-// Buffers to store register values
-uint8_t PCM1865_0_Reg[PCM1865_Reg_Size];
-uint8_t PCM1865_1_Reg[PCM1865_Reg_Size];
-
-// Variables to store extracted register values
-uint8_t PLL_Register_0;
-uint8_t PLL_Locked_0;
-uint8_t PLL_Locked_1;
-uint8_t SYS_Status_0;
-uint8_t SYS_Status_1;
-uint8_t SampleRate_0;
-uint8_t SampleRate_1;
-uint8_t BCKRate_0;
-uint8_t BCKRate_1;
-uint8_t SCKRate_0;
-uint8_t SCKRate_1;
-uint8_t ERROR_0;
-uint8_t ERROR_1;
-uint8_t PWR_Status_0;
-uint8_t PWR_Status_1;
-
-
-void read_pcm1865_registers(void) {
-    HAL_StatusTypeDef status;
-
-    // Read all registers from both PCM1865 devices
-    for (int Offset = 0; Offset < 128; Offset++) {
-        status = HAL_I2C_Mem_Read(&hi2c4, PCM1865_I2C_ADDR, Offset, 1, &PCM1865_0_Reg[Offset], 1, HAL_MAX_DELAY);
-        if (status != HAL_OK) {
-            // Handle error for PCM1865_0 (e.g., printf, error flag)
-            printf("Error reading PCM1865_0 register %d\r\n", Offset);
-            // ... error handling ...
-        }
-
-        status = HAL_I2C_Mem_Read(&hi2c4, PCM1865_I2C_ADDR_2, Offset, 1, &PCM1865_1_Reg[Offset], 1, HAL_MAX_DELAY);
-        if (status != HAL_OK) {
-            // Handle error for PCM1865_1 (e.g., printf, error flag)
-//            printf("Error reading PCM1865_1 register %d\r\n", Offset);
-            // ... error handling ...
-        }
-    }
-
-    // Extract specific register values
-
-    PLL_Register_0 = PCM1865_0_Reg[40];
-
-    PLL_Locked_0 = PCM1865_0_Reg[40] >> 4; // PLL locked
-    PLL_Locked_1 = PCM1865_1_Reg[40] >> 4;
-
-    SYS_Status_0 = PCM1865_0_Reg[114]; // System status
-    SYS_Status_1 = PCM1865_1_Reg[114];
-
-    SampleRate_0 = PCM1865_0_Reg[115]; // Sample rate
-    SampleRate_1 = PCM1865_1_Reg[115];
-
-    BCKRate_0 = PCM1865_0_Reg[116] >> 4; // BCK rate
-    BCKRate_1 = PCM1865_1_Reg[116] >> 4;
-
-    SCKRate_0 = PCM1865_0_Reg[116] & 0x0F; // SCK Rate
-    SCKRate_1 = PCM1865_1_Reg[116] & 0x0F;
-
-    ERROR_0 = PCM1865_0_Reg[117]; // Error code
-    ERROR_1 = PCM1865_1_Reg[117];
-
-    PWR_Status_0 = PCM1865_0_Reg[120]; // Power status
-    PWR_Status_1 = PCM1865_1_Reg[120];
-
-    // Print the extracted values
-
-
-   printf("PLL_Register_0: %d\r\n", PLL_Register_0);
-
-
-   printf("PLL_Locked_0: %d\r\n", PLL_Locked_0);
-   printf("PLL_Locked_1: %d\r\n", PLL_Locked_1);
-   printf("SYS_Status_0: %d\r\n", SYS_Status_0);
-   printf("SYS_Status_1: %d\r\n", SYS_Status_1);
-   printf("SampleRate_0: %d\r\n", SampleRate_0);
-   printf("SampleRate_1: %d\r\n", SampleRate_1);
-   printf("BCKRate_0: %d\r\n", BCKRate_0);
-   printf("BCKRate_1: %d\r\n", BCKRate_1);
-   printf("SCKRate_0: %d\r\n", SCKRate_0);
-   printf("SCKRate_1: %d\r\n", SCKRate_1);
-   printf("ERROR_0: %d\r\n", ERROR_0);
-   printf("ERROR_1: %d\r\n", ERROR_1);
-   printf("PWR_Status_0: %d\r\n", PWR_Status_0);
-   printf("PWR_Status_1: %d\r\n", PWR_Status_1);
-
-    // You can now use the extracted values (e.g., print them, use them for logic)
-    // Example: printf("PLL_Locked_0: %d\r\n", PLL_Locked_0);
-}
-
-//HAL_StatusTypeDef write_ADC_registers();
-
-
 volatile uint8_t bufferFull = 0;
 
 void HAL_SAI_RxHalfCpltCallback(SAI_HandleTypeDef *hsai)
@@ -626,44 +164,6 @@ void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
 }
 
 
-// void ProcessAudioChunk(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples, int32_t* tx_chunk_start, uint32_t tx_chunk_num_stereo_samples)
-// {
-//   // rx_chunk_num_samples will be TDM_RX_HALF_SIZE
-//   // tx_chunk_num_stereo_samples will be STEREO_TX_HALF_SIZE
-
-//   // Calculate how many 'frames' of 8 channels are in the RX chunk
-//   uint32_t num_frames = rx_chunk_num_samples / TDM_SLOTS; // e.g., 4096 / 8 = 512
-
-//   for (uint32_t frame = 0; frame < num_frames; ++frame) {
-//     int32_t sum = 0; // Use 32-bit accumulator to prevent overflow
-
-//     // Calculate the starting index for this frame in the RX chunk
-//     uint32_t rx_frame_start_index = frame * TDM_SLOTS;
-
-//     // 1. Sum the 8 channels for this time point
-//     for (int ch = 0; ch < 1; ++ch) {
-//     // for (int ch = 0; ch < TDM_SLOTS; ++ch) {
-//     sum += (int32_t)rx_chunk_start[rx_frame_start_index + ch] >> 8; // Right shift to convert to 24-bit
-//     }
-
-//     // 2. Optional: Scale/Average/Clip the sum
-//     //    - Simple Averaging: sum /= TDM_SLOTS;
-//     //    - Scaling: sum = (int32_t)((float)sum * 0.125f); // Scale by 1/8
-//     //    - Clipping is crucial to prevent wrap-around!
-//     int32_t output_sample;
-//     // sum /= TDM_SLOTS; // Example: Average
-//     if (sum > MAX_AMPLITUDE_24BIT) output_sample = MAX_AMPLITUDE_24BIT;
-//     else if (sum < MIN_AMPLITUDE_24BIT) output_sample = MIN_AMPLITUDE_24BIT;
-//     else output_sample = (int32_t)sum;
-
-
-//     // 3. Write the result to the corresponding stereo output position
-//     //    Each RX frame corresponds to one L/R pair in the TX chunk
-//     uint32_t tx_pair_start_index = frame * STEREO_CHANNELS; // frame * 2
-//     tx_chunk_start[tx_pair_start_index + 0] = output_sample; // Left
-//     tx_chunk_start[tx_pair_start_index + 1] = output_sample; // Right (same for mono sum)
-// }
-// }
 
 void ProcessAudioChunk(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
   int32_t* tx_chunk_start, uint32_t tx_chunk_num_stereo_samples)
@@ -753,7 +253,7 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
+  
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -790,51 +290,27 @@ timeout = 0xFFFF;
   MX_SPI3_Init();
   MX_SAI2_Init();
   /* USER CODE BEGIN 2 */
-	ADC_INIT();
+	// ADC_INIT();
+  HAL_StatusTypeDef status;
+  status = PCM1865_Init(&hi2c4);
+  if (status != HAL_OK)
+  {
+      printf("!!! PCM1865 Initialization Failed (Status: %d) !!!\r\n", status);
+      Error_Handler(); // Or handle error appropriately
+  }
+  else
+  {
+      printf("--- PCM1865 Initialization Successful ---\r\n");
+  }
 
-	I2C_Scan(&hi2c4);
+	// I2C_Scan(&hi2c4);
 
   int number = 0;
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint8_t regData;
-  uint8_t pageVal = 0;  // Suppose we want Page 3
-  HAL_StatusTypeDef status2;
-  status2 = HAL_I2C_Mem_Read(&hi2c4,
-                    PCM1865_I2C_ADDR,     // 7-bit device address << 1
-                    0x00,                 // Register 0x00 is the page-select register
-                    I2C_MEMADD_SIZE_8BIT,
-                    &regData,
-                    1,                    // Writing 1 byte
-                    100);
 
-
-  if (status2 != HAL_OK)
-    {
-  	  printf("i2c read1 fail\r\n");
-    }
-  else
-  {
-	  printf("i2c read1 success\r\n");
-  }
-
-  status2 = HAL_I2C_Mem_Read(&hi2c4,
-                      PCM1865_I2C_ADDR_2,     // 7-bit device address << 1
-                      0x00,                 // Register 0x00 is the page-select register
-                      I2C_MEMADD_SIZE_8BIT,
-                      &regData,
-                      1,                    // Writing 1 byte
-                      100);
-  if (status2 != HAL_OK)
-  {
-	  printf("i2c read2 fail\r\n");
-  }
-  else
-    {
-  	  printf("i2c read2 success\r\n");
-    }
   uint32_t error = 0;
 
   static uint16_t dummyData[2] = {3, 3};
@@ -859,86 +335,7 @@ timeout = 0xFFFF;
 
 //          while(1);
   }
-//
-//  GenerateSineWaveTable(15000);
 
-
-//  if (HAL_SAI_Transmit_DMA(&hsai_BlockB2, (uint8_t*)sineTable, 440) != HAL_OK)
-//       {
-//           // Handle error (e.g., call Error_Handler())
-//           printf("HAL_SAI_Receive_DMA2 failed\r\n");
-// //          error = HAL_SAI_GetError(&hsai_BlockB2);
-//
-// //          while(1);
-//       }
- //
-//
-//  if (HAL_SAI_Transmit_DMA(&hsai_BlockB2, (uint8_t*)Wave_LUT, 128) != HAL_OK)
-//       {
-//           // Handle error (e.g., call Error_Handler())
-//           printf("HAL_SAI_Receive_DMA2 failed\r\n");
-// //          error = HAL_SAI_GetError(&hsai_BlockB2);
-//
-// //          while(1);
-//       }
-
-//  if (HAL_SAI_Transmit_DMA(&hsai_BlockB2, (uint8_t*)sine_wave_table_128_samples, 128) != HAL_OK)
-//       {
-//           // Handle error (e.g., call Error_Handler())
-//           printf("HAL_SAI_Receive_DMA2 failed\r\n");
-// //          error = HAL_SAI_GetError(&hsai_BlockB2);
-//
-// //          while(1);
-//       }
-//
-//  fill_buffer_with_square_wave(audioPlaybackBuffer, AUDIO_BUFFER_SIZE * 2);
-//
-//  if (HAL_SAI_Transmit_DMA(&hsai_BlockB2, (uint8_t*)audioPlaybackBuffer, 880) != HAL_OK)
-//      {
-//          // Handle error (e.g., call Error_Handler())
-//          printf("HAL_SAI_Receive_DMA2 failed\r\n");
-////          error = HAL_SAI_GetError(&hsai_BlockB2);
-//
-////          while(1);
-//      }
-//
-//   fill_buffer_with_triangle_wave(triangleBuffer, TRIANGLE_BUFFER_SIZE);
-
-//   if (HAL_SAI_Transmit_DMA(&hsai_BlockB2, (uint8_t*)triangleBuffer, TRIANGLE_BUFFER_SIZE * 2) != HAL_OK)
-//       {
-//           // Handle error (e.g., call Error_Handler())
-//           printf("HAL_SAI_Receive_DMA2 failed\r\n");
-// //          error = HAL_SAI_GetError(&hsai_BlockB2);
-
-// //          while(1);
-//       }
-
-//  single_value_dma_buffer[0] = DC_VALUE_TO_TRANSMIT; // Left Channel
-//      single_value_dma_buffer[1] = DC_VALUE_TO_TRANSMIT; // Right Channel
-//      if (HAL_SAI_Transmit_DMA(&hsai_BlockB2, (uint8_t*)single_value_dma_buffer, 2) != HAL_OK)
-//           {
-//               // Handle error (e.g., call Error_Handler())
-//               printf("HAL_SAI_Receive_DMA2 failed\r\n");
-//               error = HAL_SAI_GetError(&hsai_BlockB2);
-//
-////               while(1);
-//           }
-//  while (bufferFull == 0)
-//      {
-//          // Optionally, you could put the MCU to sleep or toggle an LED here.
-//      }
-//
-//      // Optionally, if using circular DMA, abort reception to stop further transfers:
-//      HAL_SAI_DMAPause(&hsai_BlockB1);
-
-      // At this point, audioRxBuffer contains the full set of samples.
-      // For example, print out the received values over UART:
-//      for (int i = 0; i < AUDIO_BUFFER_SIZE; i++)
-//      {
-//          printf("Sample %d: %u\r\n", i, audioRxBuffer[i]);
-//      }
-
-  read_pcm1865_registers();
   while (1)
   {
     /* USER CODE END WHILE */
