@@ -91,4 +91,6 @@ HAL_StatusTypeDef PCM1865_SetGain(I2C_HandleTypeDef *hi2c, PCM1865_Device_t devi
 void PCM1865_ReadAndPrintStatus(I2C_HandleTypeDef *hi2c);
 
 
+HAL_StatusTypeDef PCM1865_SetGainDB_GlobalChannel(I2C_HandleTypeDef *hi2c, uint8_t global_channel_index, float gain_db);
+
 #endif /* INC_PCM1865_DRIVER_H_ */
