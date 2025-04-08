@@ -1,227 +1,275 @@
-// Src/audio_dsp.c
+// audio_dsp.c (For CM7 Core)
 #include "audio_dsp.h"
-#include <stddef.h> // For NULL
 #include <string.h> // For memset
+#include <math.h>   // For powf, sinf, cosf etc.
+#include <stdbool.h>
 
-// --- Include Headers for specific effect implementations ---
-#include "effect_gain.h" // Assuming you create this for gain control
-// #include "effect_filter.h" // Assuming you create this
+// --- Include Headers for your actual effect implementations ---
+// Ensure these define State structs, _Init, and _Process functions
+#include "effect_eq.h"
+#include "effect_compressor.h"
+#include "effect_distortion.h"
+#include "effect_phaser.h"
+#include "effect_reverb.h" // Needed for Master Reverb
 
 // --- Private Defines ---
-#define MAX_AMPLITUDE_24BIT (8388607)
-#define MIN_AMPLITUDE_24BIT (-8388608)
+#define PI_F 3.14159265358979323846f
 
-// --- Private Variables ---
+// Scaling/Clipping values
+#define FLOAT_SCALE_FACTOR (1.0f / 8388607.0f) // Scale int24 range to approx +/- 1.0f
+#define MAX_AMPLITUDE_24BIT_I (8388607)
+#define MIN_AMPLITUDE_24BIT_I (-8388608)
 
-// Buffers for demultiplexed channel data
-static int32_t channel_proc_buffers[DSP_NUM_TDM_CHANNELS][DSP_MAX_SAMPLES_PER_CHANNEL_CHUNK];
+// --- Static Variables ---
 
-// Buffers for the stereo master bus (before output formatting)
-// Stored as 24-bit values (shifted down) for processing convenience
-static int32_t master_bus_buffers[DSP_NUM_OUTPUT_CHANNELS][DSP_MAX_SAMPLES_PER_CHANNEL_CHUNK];
+// Pointer to the single shared parameter buffer (using the definition from your header)
+// Note: We read directly from shared_buffer_0 as per your updated requirement.
+// Make sure shared_buffer_0 itself is correctly defined and linked to the shared memory address.
+static volatile const MixerParameters* g_params = NULL; // Initialize in AudioDSP_Init
 
-// Configuration: Which effect is active on each input channel?
-static DSPEffectType_t channel_effects[DSP_NUM_TDM_CHANNELS];
+// Current sample rate
+static float g_sample_rate = 44100.0f;
 
-// Configuration: Which effect is active on the master bus?
-static DSPEffectType_t master_bus_effect;
+// Internal processing buffers (using float)
+static float channel_proc_buffers[DSP_INPUT_CHANNELS][DSP_MAX_SAMPLES_PER_CHUNK]; // Indices 0-7
+static float master_bus_buffer_L[DSP_MAX_SAMPLES_PER_CHUNK];
+static float master_bus_buffer_R[DSP_MAX_SAMPLES_PER_CHUNK];
 
-// --- Effect State Variables (Example) ---
-// If effects have state (like filter coefficients, gain levels), declare them here.
-// static float channel_gains[DSP_NUM_TDM_CHANNELS];
-// static float master_gain;
-// static BiquadCoeffs channel_filters[DSP_NUM_TDM_CHANNELS];
-// etc.
+// --- Effect State Structures ---
+// These hold the *runtime state* (filter history, LFO phase, etc.)
+
+// Channel States (Arrays match INPUT channels 0-7)
+static EQState         channel_eq_states[DSP_INPUT_CHANNELS];
+static CompressorState channel_comp_states[DSP_INPUT_CHANNELS];
+// Distortion might be stateless or need state struct
+static DistortionState channel_dist_states[DSP_INPUT_CHANNELS]; // Assuming DistortionState exists
+static PhaserState     channel_phaser_states[DSP_INPUT_CHANNELS];
+// Reverb state only needed for Master
+
+// Master Bus States (Master corresponds to channels[0] in params)
+static EQState         master_eq_state; // Assuming stereo EQ process or separate L/R state if needed
+static CompressorState master_comp_state; // Assuming stereo Comp process
+static ReverbState     master_reverb_state;
 
 
 // --- Private Helper Functions ---
 
-/**
- * @brief Clips a 64-bit value to the range of a 24-bit signed integer.
- */
-static inline int32_t ClipSample24Bit(int64_t sample) {
-    if (sample > MAX_AMPLITUDE_24BIT) return MAX_AMPLITUDE_24BIT;
-    if (sample < MIN_AMPLITUDE_24BIT) return MIN_AMPLITUDE_24BIT;
-    return (int32_t)sample;
+// Clipping
+static inline float ClipFloat(float sample, float min_val, float max_val) {
+    if (sample > max_val) return max_val;
+    if (sample < min_val) return min_val;
+    return sample;
 }
 
-
-/**
- * @brief Applies the configured DSP effect to a single channel's buffer (in-place).
- * @param channel_index The index of the channel (0 to TDM_SLOTS-1).
- * @param channel_buffer Pointer to the buffer (contains 32-bit left-aligned samples).
- * @param num_samples Number of samples in the buffer.
- */
-static void ProcessChannelDSP(uint8_t channel_index, int32_t* channel_buffer, uint32_t num_samples) {
-    DSPEffectType_t effect_type = channel_effects[channel_index];
-
-    switch (effect_type) {
-        case DSP_EFFECT_GAIN:
-            // Example: Assumes an EffectGain_Process function exists
-            // It would likely read a gain value from channel_gains[channel_index]
-            // EffectGain_Process(channel_buffer, num_samples, channel_gains[channel_index]);
-            break;
-
-        case DSP_EFFECT_FILTER:
-            // Example: Assumes an EffectFilter_Process function exists
-            // It would likely use state/coefficients stored for this channel
-            // EffectFilter_Process(channel_buffer, num_samples, &channel_filters[channel_index]);
-            break;
-
-        case DSP_EFFECT_BYPASS:
-        default:
-            // Do nothing for bypass or unknown
-            break;
-    }
-    // Note: Effects should modify the channel_buffer in-place.
+// dB to Linear conversion
+static inline float DB_to_Linear(float db) {
+    // Handle very low dB values to prevent large negative gains becoming huge positive numbers
+    if (db < -60.0f) return 0.0f;
+    return powf(10.0f, db / 20.0f);
 }
 
-/**
- * @brief Mixes processed channel data into the stereo master bus buffers.
- *        THIS FUNCTION DEFINES YOUR FIXED MIXING ROUTING.
- * @param num_samples Number of samples per channel.
- */
-static void MixChannelsToMasterBus(uint32_t num_samples) {
-    // Clear master bus buffers before summing
-    memset(master_bus_buffers, 0, sizeof(master_bus_buffers));
-
-    for (uint32_t frame = 0; frame < num_samples; ++frame) {
-        int64_t sum_l = 0;
-        int64_t sum_r = 0;
-
-        // --- DEFINE YOUR MIXING RULES HERE ---
-        // Example: Ch0->L, Ch1->R, Ch2->L(quiet), Ch3->R(quiet), Others ignored
-        if (DSP_NUM_TDM_CHANNELS >= 1) sum_l += (int64_t)(channel_proc_buffers[0][frame] >> 8); // Ch0 to Left
-        if (DSP_NUM_TDM_CHANNELS >= 2) sum_r += (int64_t)(channel_proc_buffers[1][frame] >> 8); // Ch1 to Right
-        if (DSP_NUM_TDM_CHANNELS >= 3) sum_l += (int64_t)(channel_proc_buffers[2][frame] >> 8) / 4; // Ch2 quieter to Left
-        if (DSP_NUM_TDM_CHANNELS >= 4) sum_r += (int64_t)(channel_proc_buffers[3][frame] >> 8) / 4; // Ch3 quieter to Right
-        // ... add rules for channels 4, 5, 6, 7 if needed ...
-
-        // --- END MIXING RULES ---
-
-        // Clip the sum for each master bus channel
-        // Store as 24-bit value (no left-shift yet)
-        master_bus_buffers[0][frame] = ClipSample24Bit(sum_l); // Left Bus
-        master_bus_buffers[1][frame] = ClipSample24Bit(sum_r); // Right Bus
-    }
-}
-
-
-/**
- * @brief Applies the configured DSP effect to the stereo master bus buffers (in-place).
- * @param num_samples Number of samples per channel.
- */
-static void ApplyDSP_MasterBus(uint32_t num_samples) {
-    switch (master_bus_effect) {
-        case DSP_EFFECT_GAIN:
-            // Example: Apply gain to both L and R master bus buffers
-            // Assumes EffectGain_Process can handle this or call it twice
-            // EffectGain_Process(master_bus_buffers[0], num_samples, master_gain); // Process Left
-            // EffectGain_Process(master_bus_buffers[1], num_samples, master_gain); // Process Right
-            break;
-
-        case DSP_EFFECT_FILTER:
-            // Example: Apply filter to L/R
-            // EffectFilter_ProcessStereo(master_bus_buffers[0], master_bus_buffers[1], num_samples, &master_bus_filter_coeffs);
-            break;
-
-        case DSP_EFFECT_BYPASS:
-        default:
-            // Do nothing
-            break;
-    }
-    // Note: Master bus effects modify master_bus_buffers in-place.
-    // They operate on the 24-bit data (not left-shifted yet).
+// Panning Gains (0=Left, 0.5=Center, 1.0=Right)
+static void CalculatePanFactors(float pan_0_to_1, float* pan_l, float* pan_r) {
+    // Ensure pan is within 0.0 to 1.0 range
+    pan_0_to_1 = ClipFloat(pan_0_to_1, 0.0f, 1.0f);
+    // Use square root law for constant power panning
+    float angle = pan_0_to_1 * PI_F * 0.5f; // Map 0..1 to 0..pi/2
+    *pan_l = cosf(angle);
+    *pan_r = sinf(angle);
 }
 
 
 // --- Public Function Implementations ---
 
-void AudioDSP_Init(void) {
+void AudioDSP_Init(float sample_rate) {
+    g_sample_rate = sample_rate;
+    g_params = shared_buffer_0; // Point to the designated shared buffer
+
+    printf("AudioDSP: Initializing...\r\n");
+    printf("AudioDSP: Sample Rate: %.1f Hz\r\n", g_sample_rate);
+
+    if (!g_params) {
+        printf("AudioDSP: Error! Shared parameter buffer pointer is NULL (shared_buffer_0 invalid?)\r\n");
+        // Handle fatal error - perhaps hang here if essential
+        while(1);
+    }
+
+    // Initialize internal processing buffers
     memset(channel_proc_buffers, 0, sizeof(channel_proc_buffers));
-    memset(master_bus_buffers, 0, sizeof(master_bus_buffers));
+    memset(master_bus_buffer_L, 0, sizeof(master_bus_buffer_L));
+    memset(master_bus_buffer_R, 0, sizeof(master_bus_buffer_R));
 
-    // Set default effects to bypass
-    for (int i = 0; i < DSP_NUM_TDM_CHANNELS; ++i) {
-        channel_effects[i] = DSP_EFFECT_BYPASS;
-        // Initialize default parameters if needed (e.g., channel_gains[i] = 1.0f;)
+    // Initialize Effect States
+    printf("AudioDSP: Initializing effect states...\r\n");
+    for (int i = 0; i < DSP_INPUT_CHANNELS; ++i) {
+        EQ_Init(&channel_eq_states[i], g_sample_rate);
+        Compressor_Init(&channel_comp_states[i], g_sample_rate);
+        Distortion_Init(&channel_dist_states[i]); // Pass state if needed
+        Phaser_Init(&channel_phaser_states[i], g_sample_rate);
+        // No reverb state per channel
     }
-    master_bus_effect = DSP_EFFECT_BYPASS;
-    // Initialize default master parameters (e.g., master_gain = 1.0f;)
+    // Initialize Master States
+    EQ_Init(&master_eq_state, g_sample_rate);
+    Compressor_Init(&master_comp_state, g_sample_rate);
+    Reverb_Init(&master_reverb_state, g_sample_rate);
 
-    // Call Init functions for specific effect modules if they have state
-    // EffectGain_Init();
-    // EffectFilter_Init();
-}
-
-int AudioDSP_SetChannelEffect(uint8_t channel_index, DSPEffectType_t effect) {
-    if (channel_index >= DSP_NUM_TDM_CHANNELS || effect >= DSP_EFFECT_TYPE_COUNT) {
-        return -1; // Invalid input
-    }
-    channel_effects[channel_index] = effect;
-    // Optional: Reset parameters for this channel when changing effect type
-    return 0;
-}
-
-int AudioDSP_SetMasterBusEffect(DSPEffectType_t effect) {
-    if (effect >= DSP_EFFECT_TYPE_COUNT) {
-        return -1; // Invalid input
-    }
-    master_bus_effect = effect;
-    // Optional: Reset master parameters when changing effect type
-    return 0;
+    printf("AudioDSP: Initialization Complete.\r\n");
 }
 
 
-/**
- * @brief Processes audio chunk through the full pipeline.
- */
 void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
                       int32_t* tx_chunk_start, uint32_t tx_chunk_num_stereo_samples)
 {
-    // --- Input Validation ---
-    if (rx_chunk_start == NULL || tx_chunk_start == NULL) return;
+    // --- Pre-Checks ---
+    if (!g_params || !rx_chunk_start || !tx_chunk_start) return;
 
-    uint32_t samples_per_channel = rx_chunk_num_samples / DSP_NUM_TDM_CHANNELS;
-    uint32_t num_tx_pairs = tx_chunk_num_stereo_samples / DSP_NUM_OUTPUT_CHANNELS;
+    // Check if hardware is ready (flag set by CM4)
+    if (!g_params->hw_init_ready) {
+        memset(tx_chunk_start, 0, tx_chunk_num_stereo_samples * sizeof(int32_t)); // Output silence
+        return;
+    }
 
-    if (samples_per_channel == 0 || samples_per_channel > DSP_MAX_SAMPLES_PER_CHANNEL_CHUNK ||
+    uint32_t samples_per_channel = rx_chunk_num_samples / DSP_INPUT_CHANNELS; // Use DSP_INPUT_CHANNELS (8)
+    uint32_t num_tx_pairs = tx_chunk_num_stereo_samples / DSP_OUTPUT_CHANNELS;
+
+    // Validate buffer sizes
+    if (samples_per_channel == 0 || samples_per_channel > DSP_MAX_SAMPLES_PER_CHUNK ||
         samples_per_channel != num_tx_pairs ||
-        rx_chunk_num_samples % DSP_NUM_TDM_CHANNELS != 0 ||
-        tx_chunk_num_stereo_samples % DSP_NUM_OUTPUT_CHANNELS != 0)
+        rx_chunk_num_samples % DSP_INPUT_CHANNELS != 0 ||
+        tx_chunk_num_stereo_samples % DSP_OUTPUT_CHANNELS != 0)
     {
         memset(tx_chunk_start, 0, tx_chunk_num_stereo_samples * sizeof(int32_t));
         return;
     }
 
-    // --- Stage 1: Demultiplex ---
+    // --- Stage 1: Demultiplex and Convert to Float ---
     for (uint32_t frame = 0; frame < samples_per_channel; ++frame) {
-        uint32_t rx_frame_start_index = frame * DSP_NUM_TDM_CHANNELS;
-        for (int ch = 0; ch < DSP_NUM_TDM_CHANNELS; ++ch) {
-            channel_proc_buffers[ch][frame] = rx_chunk_start[rx_frame_start_index + ch];
+        uint32_t rx_frame_start_index = frame * DSP_INPUT_CHANNELS;
+        for (int ch = 0; ch < DSP_INPUT_CHANNELS; ++ch) { // Loop 0-7
+            // Convert int24 (in int32, left-aligned) to float approx +/- 1.0
+            channel_proc_buffers[ch][frame] = (float)(rx_chunk_start[rx_frame_start_index + ch] >> 8) * FLOAT_SCALE_FACTOR;
         }
     }
 
+
     // --- Stage 2: Per-Channel DSP ---
-    for (int ch = 0; ch < DSP_NUM_TDM_CHANNELS; ++ch) {
-        ProcessChannelDSP(ch, channel_proc_buffers[ch], samples_per_channel);
+    bool solo_mode_active = g_params->soloing_active;
+
+    for (int i = 0; i < DSP_INPUT_CHANNELS; ++i) { // Loop 0-7 for buffers
+        int param_idx = i + 1; // Corresponding index in params->channels[1..8]
+
+        // Determine if channel should pass based on Mute/Solo
+        bool channel_active = true;
+        if (g_params->channels[param_idx].muted) {
+            channel_active = false;
+        } else if (solo_mode_active && !g_params->channels[param_idx].soloed) {
+            channel_active = false;
+        }
+
+        if (channel_active) {
+            // Apply effects sequentially if enabled
+            // Pass pointer to relevant parameter struct from shared memory
+            const ChannelParameters* chan_p = &g_params->channels[param_idx];
+
+            if (chan_p->equalizer.enabled) {
+                EQ_Process(&channel_eq_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->equalizer);
+            }
+            if (chan_p->compressor.enabled) {
+                Compressor_Process(&channel_comp_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->compressor);
+            }
+            if (chan_p->distortion.enabled) {
+                Distortion_Process(&channel_dist_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->distortion);
+            }
+            if (chan_p->phaser.enabled) {
+                Phaser_Process(&channel_phaser_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->phaser);
+            }
+            // Reverb processing happens only on master according to struct design
+        } else {
+            // If channel is inactive (muted/not soloed), clear its processing buffer
+            memset(channel_proc_buffers[i], 0, samples_per_channel * sizeof(float));
+        }
     }
 
-    // --- Stage 3: Mixdown to Master Bus ---
-    MixChannelsToMasterBus(samples_per_channel);
 
-    // --- Stage 4: Master Bus DSP ---
-    ApplyDSP_MasterBus(samples_per_channel);
+    // --- Stage 3: Mixdown (Apply Gain, Pan, Sum to Master) ---
+    memset(master_bus_buffer_L, 0, samples_per_channel * sizeof(float));
+    memset(master_bus_buffer_R, 0, samples_per_channel * sizeof(float));
 
-    // --- Stage 5: Output Formatting ---
-    // Copy processed & clipped master bus data to the final TX buffer, left-shifting.
+    for (int i = 0; i < DSP_INPUT_CHANNELS; ++i) { // Loop 0-7 for buffers
+        int param_idx = i + 1; // Corresponding index in params->channels[1..8]
+
+        // Check active state again (don't sum inactive channels)
+        bool channel_active = true;
+        if (g_params->channels[param_idx].muted) channel_active = false;
+        else if (solo_mode_active && !g_params->channels[param_idx].soloed) channel_active = false;
+
+        if (channel_active) {
+            float gain_linear = DB_to_Linear(g_params->channels[param_idx].digital_gain);
+            float pan_l, pan_r;
+            CalculatePanFactors(g_params->channels[param_idx].panning, &pan_l, &pan_r);
+
+            // Apply gain and panning, then sum to master buses
+            for (uint32_t frame = 0; frame < samples_per_channel; ++frame) {
+                float sample = channel_proc_buffers[i][frame] * gain_linear;
+                master_bus_buffer_L[frame] += sample * pan_l;
+                master_bus_buffer_R[frame] += sample * pan_r;
+            }
+        }
+    }
+
+
+    // --- Stage 4: Master Bus Processing ---
+    // Access master parameters via index 0
+    const ChannelParameters* master_p = &g_params->channels[0];
+
+    // Apply Master Effects (if enabled)
+    if (master_p->equalizer.enabled) {
+        // Assuming EQ_Process handles stereo or call twice if needed
+        EQ_Process(&master_eq_state, master_bus_buffer_L, samples_per_channel, &master_p->equalizer); // Process L
+        EQ_Process(&master_eq_state, master_bus_buffer_R, samples_per_channel, &master_p->equalizer); // Process R (using same state/params?) - Adjust if EQ needs separate L/R state
+    }
+    if (master_p->compressor.enabled) {
+        // Assuming Compressor_Process handles stereo or call twice
+        Compressor_Process(&master_comp_state, master_bus_buffer_L, samples_per_channel, &master_p->compressor); // Process L
+        Compressor_Process(&master_comp_state, master_bus_buffer_R, samples_per_channel, &master_p->compressor); // Process R (using same state/params?) - Adjust if needed
+    }
+     if (master_p->reverb.enabled) {
+        // Reverb usually creates stereo output even from mono input, or processes L/R separately
+        // Needs a Reverb_ProcessStereo or similar function signature
+        Reverb_ProcessStereo(&master_reverb_state, master_bus_buffer_L, master_bus_buffer_R, samples_per_channel, &master_p->reverb);
+    }
+
+
+    // Apply Master Gain
+    float master_gain_linear = DB_to_Linear(master_p->digital_gain);
     for (uint32_t frame = 0; frame < samples_per_channel; ++frame) {
-        uint32_t tx_pair_start_index = frame * DSP_NUM_OUTPUT_CHANNELS;
-        tx_chunk_start[tx_pair_start_index + 0] = master_bus_buffers[0][frame]; // Left Output
-        tx_chunk_start[tx_pair_start_index + 1] = master_bus_buffers[1][frame]; // Right Output
+        master_bus_buffer_L[frame] *= master_gain_linear;
+        master_bus_buffer_R[frame] *= master_gain_linear;
+    }
+
+    // Apply Mono/Stereo Toggle
+    if (!master_p->stereo) { // If stereo bool is FALSE, make mono
+        for (uint32_t frame = 0; frame < samples_per_channel; ++frame) {
+            float mono_sample = (master_bus_buffer_L[frame] + master_bus_buffer_R[frame]) * 0.5f;
+            master_bus_buffer_L[frame] = mono_sample;
+            master_bus_buffer_R[frame] = mono_sample;
+        }
+    }
+
+
+    // --- Stage 5: Output Formatting (Float -> Int24 -> Int32 Left-Aligned) ---
+    for (uint32_t frame = 0; frame < samples_per_channel; ++frame) {
+        // Clip final float values (nominally +/- 1.0) before converting
+        float clipped_l = ClipFloat(master_bus_buffer_L[frame], -1.0f, 1.0f);
+        float clipped_r = ClipFloat(master_bus_buffer_R[frame], -1.0f, 1.0f);
+
+        // Scale float to 24-bit integer range
+        int32_t output_l_24bit = (int32_t)(clipped_l * (float)MAX_AMPLITUDE_24BIT_I);
+        int32_t output_r_24bit = (int32_t)(clipped_r * (float)MAX_AMPLITUDE_24BIT_I);
+
+        // Write to stereo TX buffer, left-shifting
+        uint32_t tx_pair_start_index = frame * DSP_OUTPUT_CHANNELS;
+        tx_chunk_start[tx_pair_start_index + 0] = output_l_24bit << 8; // Left
+        tx_chunk_start[tx_pair_start_index + 1] = output_r_24bit << 8; // Right
     }
 }
-
-// --- Implement parameter setting functions if needed ---
-// int AudioDSP_SetChannelGain(uint8_t channel_index, float gain_db) { ... }
-// int AudioDSP_SetMasterBusGain(float gain_db) { ... }

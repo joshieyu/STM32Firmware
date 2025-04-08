@@ -24,9 +24,9 @@ typedef struct MixerParameters MixerParameters;
 
 // Helper substruct type for Equalizer shelves/bands
 typedef struct EqualizerBandParameters {
-    float gain_db;
-    float cutoff_freq;
-    float q_factor;
+    float gain_db; // +12.0 dB to -12.0 dB
+    float cutoff_freq;  // 20 Hz to 20 kHz
+    float q_factor; // 0.1 to 6.0
 } EqualizerBandParameters;
 
 typedef struct EqualizerParameters {
@@ -74,7 +74,7 @@ typedef struct ChannelParameters {
     bool muted; // 0 = not muted, 1 = muted (or use bool if supported)
     bool soloed; // 0 = not soloed, 1 = soloed
     float panning; // [0.0 .. 1.0]; 0.5 is center, 0.0 is left, 1.0 is right
-    float digital_gain // 0 db = signal is unmodified. Range is [-60 dB (essentially -inf dB) ... +6 dB]
+    float digital_gain; // 0 db = signal is unmodified. Range is [-60 dB (essentially -inf dB) ... +6 dB]
 
     bool stereo; // only relevant for the main channel. 0 = mono, 1 = stereo
     // analog gain is not stored in shared memory, ... CM4 handles that by itself
