@@ -1,5 +1,6 @@
 #include "pcm1865.h"
 #include "stdio.h" // For printf in status function
+#include <math.h> // For roundf
 
 /* USER CODE BEGIN Includes */
 // Add any other necessary includes for your project if needed
@@ -21,8 +22,15 @@
 #define TDM_FORMAT_CONFIG   0x43 // 32-bit Word, 256-Fs TDM, Master Mode Clk Det, TDM Format, 32-bit Data
 #define TDM_OUTPUT_SLOTS    0x01 // Enable ADC1L/R and ADC2L/R output (4 slots total per device)
 #define CLOCK_CONFIG        0x01 // Auto Clock Config Mode
-#define DEFAULT_GAIN        0x18 // +12dB default gain
+#define DEFAULT_GAIN        0x00 // +12dB default gain
 
+// Define the limits based on the PCM1865 datasheet (Register 1 description)
+#define PGA_MIN_DB (-12.0f)
+#define PGA_MAX_DB (40.0f)
+
+// Corresponding integer values (dB * 2) for clamping
+#define PGA_MIN_INT_VAL (-24) // -12.0 * 2
+#define PGA_MAX_INT_VAL (80)  //  40.0 * 2
 
 // --- Private Helper Functions ---
 
@@ -216,6 +224,85 @@ HAL_StatusTypeDef PCM1865_SetGain(I2C_HandleTypeDef *hi2c, PCM1865_Device_t devi
     // Write the gain value
     return PCM1865_WriteReg(hi2c, deviceAddr, registerAddr, gainValue);
 }
+
+// ... (Private Defines: PGA_MIN_DB, PGA_MAX_DB, PGA_MIN_INT_VAL, PGA_MAX_INT_VAL) ...
+// ... (Private Helper Functions: PCM1865_WriteReg, PCM1865_ReadReg) ...
+// ... (Public Functions: PCM1865_Init, PCM1865_SetGain, PCM1865_ReadAndPrintStatus, PCM1865_SetGainDB) ...
+
+
+/**
+ * @brief Sets the PGA gain for a specific global TDM input channel (0-7) using a decibel value.
+ */
+HAL_StatusTypeDef PCM1865_SetGainDB_GlobalChannel(I2C_HandleTypeDef *hi2c, uint8_t global_channel_index, float gain_db)
+{
+    PCM1865_Device_t target_device;
+    PCM1865_Channel_t local_channel;
+    int integer_gain;
+    uint8_t gain_register_value;
+
+    if (hi2c == NULL) {
+        return HAL_ERROR;
+    }
+
+    // --- 1. Validate Global Channel Index ---
+    if (global_channel_index > 7) {
+        printf("PCM1865_SetGainDB_GlobalChannel: Error - Invalid global channel index %d (must be 0-7)\r\n", global_channel_index);
+        return HAL_ERROR;
+    }
+
+    // --- 2. Convert dB to 8-bit Register Value (reuse logic from PCM1865_SetGainDB) ---
+    // Clamp input dB
+    if (gain_db < PGA_MIN_DB) gain_db = PGA_MIN_DB;
+    else if (gain_db > PGA_MAX_DB) gain_db = PGA_MAX_DB;
+    // Convert to 7.1 integer
+    integer_gain = (int)roundf(gain_db * 2.0f);
+    // Clamp integer value
+    if (integer_gain < PGA_MIN_INT_VAL) integer_gain = PGA_MIN_INT_VAL;
+    else if (integer_gain > PGA_MAX_INT_VAL) integer_gain = PGA_MAX_INT_VAL;
+    // Cast to get register value
+    gain_register_value = (uint8_t)integer_gain;
+
+
+    // --- 3. Map Global Channel Index to Device and Local Channel ---
+    // Determine target device
+    if (global_channel_index < 4) {
+        target_device = PCM1865_DEVICE_0;
+    } else {
+        target_device = PCM1865_DEVICE_1;
+    }
+
+    // Determine local channel within the device (using modulo)
+    uint8_t local_channel_offset = global_channel_index % 4;
+    switch (local_channel_offset) {
+        case 0:
+            local_channel = PCM1865_CHANNEL_1_LEFT;
+            break;
+        case 1:
+            local_channel = PCM1865_CHANNEL_1_RIGHT;
+            break;
+        case 2:
+            local_channel = PCM1865_CHANNEL_2_LEFT;
+            break;
+        case 3:
+            local_channel = PCM1865_CHANNEL_2_RIGHT;
+            break;
+        default:
+            // Should not happen due to modulo 4
+            printf("PCM1865_SetGainDB_GlobalChannel: Internal error mapping local channel offset %d\r\n", local_channel_offset);
+            return HAL_ERROR;
+    }
+
+    // --- 4. Call the existing SetGain function with the mapped values ---
+    //    This function already handles the I2C address and register lookup.
+    // Optional: Debug print
+    // printf("Set Global Chan %d (Dev %d, Local %d) Gain: %.1f dB -> Reg: 0x%02X\r\n",
+    //        global_channel_index, (target_device == PCM1865_DEVICE_0 ? 0 : 1), local_channel,
+    //        gain_db, gain_register_value);
+
+    return PCM1865_SetGain(hi2c, target_device, local_channel, gain_register_value);
+}
+
+// ... (Rest of pcm1865_driver.c) ...
 
 
 /**

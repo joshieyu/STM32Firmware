@@ -336,6 +336,9 @@ timeout = 0xFFFF;
 //          while(1);
   }
 
+
+  PCM1865_SetGainDB_GlobalChannel(&hi2c4, 7, 6.0f);
+
   while (1)
   {
     /* USER CODE END WHILE */
