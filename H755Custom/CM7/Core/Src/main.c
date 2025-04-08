@@ -291,17 +291,6 @@ timeout = 0xFFFF;
   MX_SAI2_Init();
   /* USER CODE BEGIN 2 */
 	// ADC_INIT();
-  HAL_StatusTypeDef status;
-  status = PCM1865_Init(&hi2c4);
-  if (status != HAL_OK)
-  {
-      printf("!!! PCM1865 Initialization Failed (Status: %d) !!!\r\n", status);
-      Error_Handler(); // Or handle error appropriately
-  }
-  else
-  {
-      printf("--- PCM1865 Initialization Successful ---\r\n");
-  }
 
 	// I2C_Scan(&hi2c4);
 
