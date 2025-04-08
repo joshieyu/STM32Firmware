@@ -92,4 +92,5 @@ typedef struct MixerParameters {
     ChannelParameters channels[9]; // 0 = main, 1-8 correspond to input channels 1 to 8
     bool soloing_active; // true if one or more channels are soloed
     bool inferencing_active; // true if inferencing is underway (i.e. audio data is being streamed from STM to Pi)
+    bool hw_init_ready; // true is ADCs/DACs are initialized, false if not (and the CM7 should not perform DSP)
 } MixerParameters;
