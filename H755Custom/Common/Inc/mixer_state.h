@@ -1,35 +1,27 @@
+// Common/Inc/mixer_state.h
+
+#ifndef MIXER_STATE_H // <-- Add Include Guard
+#define MIXER_STATE_H // <-- Add Include Guard
+
 #include <stdint.h>
 #include <stdbool.h>
 
 #define SHARED_MEM_BASE 0x38000000
 
-volatile MixerParameters * const shared_buffer_0 = (MixerParameters *)SHARED_MEM_BASE;
-volatile MixerParameters * const shared_buffer_1 = (MixerParameters *)(SHARED_MEM_BASE + sizeof(MixerParameters));
-volatile uint32_t * const shared_active_idx_ptr = (uint32_t *)(SHARED_MEM_BASE + 2 * sizeof(MixerParameters));
+// --- Remove Forward Typedefs (they are redundant with the full definitions below) ---
+// typedef struct EqualizerParameters EqualizerParameters;
+// ... and so on for all structs ...
 
-// Defines typedefs for effects
-typedef struct EqualizerParameters EqualizerParameters;
-typedef struct CompressorParameters CompressorParameters;
-typedef struct DistortionParameters DistortionParameters;
-typedef struct PhaserParameters PhaserParameters;
-typedef struct ReverbParameters ReverbParameters;
-
-// Define typedefs for channel and overall mixer state
-typedef struct ChannelParameters ChannelParameters;
-typedef struct MixerParameters MixerParameters;
-
-
-// Each of the following 5 effect parameter structs has an "enabled" bool.
-// If !enabled, skip processing that effect
+// --- Struct Definitions (Keep these as they define the types) ---
 
 // Helper substruct type for Equalizer shelves/bands
-typedef struct EqualizerBandParameters {
-    float gain_db; // +12.0 dB to -12.0 dB
-    float cutoff_freq;  // 20 Hz to 20 kHz
-    float q_factor; // 0.1 to 6.0
-} EqualizerBandParameters;
+typedef struct { // No forward typedef needed here
+    float gain_db;
+    float cutoff_freq;
+    float q_factor;
+} EqualizerBandParameters; // Define the type name *after* the struct body
 
-typedef struct EqualizerParameters {
+typedef struct { // No forward typedef needed here
     bool enabled;
     EqualizerBandParameters lowShelf;
     EqualizerBandParameters highShelf;
@@ -37,9 +29,9 @@ typedef struct EqualizerParameters {
     EqualizerBandParameters band1;
     EqualizerBandParameters band2;
     EqualizerBandParameters band3;
-} EqualizerParameters;
+} EqualizerParameters; // Define the type name *after* the struct body
 
-typedef struct CompressorParameters {
+typedef struct { // No forward typedef needed here
     bool enabled;
     float threshold_db;
     float ratio;
@@ -47,50 +39,54 @@ typedef struct CompressorParameters {
     float release_ms;
     float knee_db;
     float makeup_gain_db;
-} CompressorParameters;
+} CompressorParameters; // Define the type name *after* the struct body
 
-typedef struct DistortionParameters {
+typedef struct { // No forward typedef needed here
     bool enabled;
     float drive; // 0 db to 20 dB
     float output_gain_db; // -20 dB to 0 dB
-} DistortionParameters;
+} DistortionParameters; // Define the type name *after* the struct body
 
-typedef struct PhaserParameters {
+typedef struct { // No forward typedef needed here
     bool enabled;
     float rate; // 0.1 Hz to 10 Hz (logarithmic scaling)
     float depth; // from 0% to 100%
-} PhaserParameters;
+} PhaserParameters; // Define the type name *after* the struct body
 
-// Reverb is only found on the main bus
-typedef struct ReverbParameters {
+typedef struct { // No forward typedef needed here
     bool enabled;
     float decay_time; // 0.3 seconds to 3 seconds
     float wet_level; // 0% to 100%
-} ReverbParameters;
+} ReverbParameters; // Define the type name *after* the struct body
 
-// Channel Parameters
-typedef struct ChannelParameters {
-    // Following 5 values are parameters for the channel in and of itself
-    bool muted; // 0 = not muted, 1 = muted (or use bool if supported)
-    bool soloed; // 0 = not soloed, 1 = soloed
-    float panning; // [0.0 .. 1.0]; 0.5 is center, 0.0 is left, 1.0 is right
-    float digital_gain; // 0 db = signal is unmodified. Range is [-60 dB (essentially -inf dB) ... +6 dB]
+// Define ChannelParameters *after* all the effect structs it uses
+typedef struct { // No forward typedef needed here
+    bool muted;
+    bool soloed;
+    float panning; // [0.0 .. 1.0]
+    float digital_gain; // [-60 dB ... +6 dB]
+    bool stereo; // only relevant for the main channel.
 
-    bool stereo; // only relevant for the main channel. 0 = mono, 1 = stereo
-    // analog gain is not stored in shared memory, ... CM4 handles that by itself
-
-    // Following 5 values are structs containing parameters for each of our 5 effects
     EqualizerParameters equalizer;
     CompressorParameters compressor;
     DistortionParameters distortion;
     PhaserParameters phaser;
     ReverbParameters reverb;
-} ChannelParameters;
+} ChannelParameters; // Define the type name *after* the struct body
 
-// Parameters corresponding to overall mixer state
-typedef struct MixerParameters {
+// Define MixerParameters *after* ChannelParameters
+typedef struct { // No forward typedef needed here
     ChannelParameters channels[9]; // 0 = main, 1-8 correspond to input channels 1 to 8
-    bool soloing_active; // true if one or more channels are soloed
-    bool inferencing_active; // true if inferencing is underway (i.e. audio data is being streamed from STM to Pi)
-    bool hw_init_ready; // true is ADCs/DACs are initialized, false if not (and the CM7 should not perform DSP)
-} MixerParameters;
+    bool soloing_active;
+    bool inferencing_active;
+    bool hw_init_ready;
+} MixerParameters; // Define the type name *after* the struct body
+
+
+// --- Declarations of Global Variables (use extern) ---
+// This tells the compiler these variables exist elsewhere.
+extern volatile MixerParameters * const shared_buffer_0;
+extern volatile MixerParameters * const shared_buffer_1; // Keep if using double buffering
+extern volatile uint32_t * const shared_active_idx_ptr; // Keep if using double buffering
+
+#endif // MIXER_STATE_H <-- Add Include Guard End -->

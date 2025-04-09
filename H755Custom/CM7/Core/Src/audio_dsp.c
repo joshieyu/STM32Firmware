@@ -6,11 +6,11 @@
 
 // --- Include Headers for your actual effect implementations ---
 // Ensure these define State structs, _Init, and _Process functions
-#include "effect_eq.h"
-#include "effect_compressor.h"
-#include "effect_distortion.h"
-#include "effect_phaser.h"
-#include "effect_reverb.h" // Needed for Master Reverb
+// #include "effect_eq.h"
+// #include "effect_compressor.h"
+// #include "effect_distortion.h"
+// #include "effect_phaser.h"
+// #include "effect_reverb.h" // Needed for Master Reverb
 
 // --- Private Defines ---
 #define PI_F 3.14159265358979323846f
@@ -38,18 +38,18 @@ static float master_bus_buffer_R[DSP_MAX_SAMPLES_PER_CHUNK];
 // --- Effect State Structures ---
 // These hold the *runtime state* (filter history, LFO phase, etc.)
 
-// Channel States (Arrays match INPUT channels 0-7)
-static EQState         channel_eq_states[DSP_INPUT_CHANNELS];
-static CompressorState channel_comp_states[DSP_INPUT_CHANNELS];
-// Distortion might be stateless or need state struct
-static DistortionState channel_dist_states[DSP_INPUT_CHANNELS]; // Assuming DistortionState exists
-static PhaserState     channel_phaser_states[DSP_INPUT_CHANNELS];
-// Reverb state only needed for Master
+// // Channel States (Arrays match INPUT channels 0-7)
+// static EQState         channel_eq_states[DSP_INPUT_CHANNELS];
+// static CompressorState channel_comp_states[DSP_INPUT_CHANNELS];
+// // Distortion might be stateless or need state struct
+// static DistortionState channel_dist_states[DSP_INPUT_CHANNELS]; // Assuming DistortionState exists
+// static PhaserState     channel_phaser_states[DSP_INPUT_CHANNELS];
+// // Reverb state only needed for Master
 
-// Master Bus States (Master corresponds to channels[0] in params)
-static EQState         master_eq_state; // Assuming stereo EQ process or separate L/R state if needed
-static CompressorState master_comp_state; // Assuming stereo Comp process
-static ReverbState     master_reverb_state;
+// // Master Bus States (Master corresponds to channels[0] in params)
+// static EQState         master_eq_state; // Assuming stereo EQ process or separate L/R state if needed
+// static CompressorState master_comp_state; // Assuming stereo Comp process
+// static ReverbState     master_reverb_state;
 
 
 // --- Private Helper Functions ---
@@ -99,19 +99,19 @@ void AudioDSP_Init(float sample_rate) {
     memset(master_bus_buffer_L, 0, sizeof(master_bus_buffer_L));
     memset(master_bus_buffer_R, 0, sizeof(master_bus_buffer_R));
 
-    // Initialize Effect States
-    printf("AudioDSP: Initializing effect states...\r\n");
-    for (int i = 0; i < DSP_INPUT_CHANNELS; ++i) {
-        EQ_Init(&channel_eq_states[i], g_sample_rate);
-        Compressor_Init(&channel_comp_states[i], g_sample_rate);
-        Distortion_Init(&channel_dist_states[i]); // Pass state if needed
-        Phaser_Init(&channel_phaser_states[i], g_sample_rate);
-        // No reverb state per channel
-    }
-    // Initialize Master States
-    EQ_Init(&master_eq_state, g_sample_rate);
-    Compressor_Init(&master_comp_state, g_sample_rate);
-    Reverb_Init(&master_reverb_state, g_sample_rate);
+    // // Initialize Effect States
+    // printf("AudioDSP: Initializing effect states...\r\n");
+    // for (int i = 0; i < DSP_INPUT_CHANNELS; ++i) {
+    //     EQ_Init(&channel_eq_states[i], g_sample_rate);
+    //     Compressor_Init(&channel_comp_states[i], g_sample_rate);
+    //     Distortion_Init(&channel_dist_states[i]); // Pass state if needed
+    //     Phaser_Init(&channel_phaser_states[i], g_sample_rate);
+    //     // No reverb state per channel
+    // }
+    // // Initialize Master States
+    // EQ_Init(&master_eq_state, g_sample_rate);
+    // Compressor_Init(&master_comp_state, g_sample_rate);
+    // Reverb_Init(&master_reverb_state, g_sample_rate);
 
     printf("AudioDSP: Initialization Complete.\r\n");
 }
@@ -171,18 +171,18 @@ void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
             // Pass pointer to relevant parameter struct from shared memory
             const ChannelParameters* chan_p = &g_params->channels[param_idx];
 
-            if (chan_p->equalizer.enabled) {
-                EQ_Process(&channel_eq_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->equalizer);
-            }
-            if (chan_p->compressor.enabled) {
-                Compressor_Process(&channel_comp_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->compressor);
-            }
-            if (chan_p->distortion.enabled) {
-                Distortion_Process(&channel_dist_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->distortion);
-            }
-            if (chan_p->phaser.enabled) {
-                Phaser_Process(&channel_phaser_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->phaser);
-            }
+            // if (chan_p->equalizer.enabled) {
+            //     EQ_Process(&channel_eq_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->equalizer);
+            // }
+            // if (chan_p->compressor.enabled) {
+            //     Compressor_Process(&channel_comp_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->compressor);
+            // }
+            // if (chan_p->distortion.enabled) {
+            //     Distortion_Process(&channel_dist_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->distortion);
+            // }
+            // if (chan_p->phaser.enabled) {
+            //     Phaser_Process(&channel_phaser_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->phaser);
+            // }
             // Reverb processing happens only on master according to struct design
         } else {
             // If channel is inactive (muted/not soloed), clear its processing buffer
@@ -222,22 +222,22 @@ void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
     // Access master parameters via index 0
     const ChannelParameters* master_p = &g_params->channels[0];
 
-    // Apply Master Effects (if enabled)
-    if (master_p->equalizer.enabled) {
-        // Assuming EQ_Process handles stereo or call twice if needed
-        EQ_Process(&master_eq_state, master_bus_buffer_L, samples_per_channel, &master_p->equalizer); // Process L
-        EQ_Process(&master_eq_state, master_bus_buffer_R, samples_per_channel, &master_p->equalizer); // Process R (using same state/params?) - Adjust if EQ needs separate L/R state
-    }
-    if (master_p->compressor.enabled) {
-        // Assuming Compressor_Process handles stereo or call twice
-        Compressor_Process(&master_comp_state, master_bus_buffer_L, samples_per_channel, &master_p->compressor); // Process L
-        Compressor_Process(&master_comp_state, master_bus_buffer_R, samples_per_channel, &master_p->compressor); // Process R (using same state/params?) - Adjust if needed
-    }
-     if (master_p->reverb.enabled) {
-        // Reverb usually creates stereo output even from mono input, or processes L/R separately
-        // Needs a Reverb_ProcessStereo or similar function signature
-        Reverb_ProcessStereo(&master_reverb_state, master_bus_buffer_L, master_bus_buffer_R, samples_per_channel, &master_p->reverb);
-    }
+    // // Apply Master Effects (if enabled)
+    // if (master_p->equalizer.enabled) {
+    //     // Assuming EQ_Process handles stereo or call twice if needed
+    //     EQ_Process(&master_eq_state, master_bus_buffer_L, samples_per_channel, &master_p->equalizer); // Process L
+    //     EQ_Process(&master_eq_state, master_bus_buffer_R, samples_per_channel, &master_p->equalizer); // Process R (using same state/params?) - Adjust if EQ needs separate L/R state
+    // }
+    // if (master_p->compressor.enabled) {
+    //     // Assuming Compressor_Process handles stereo or call twice
+    //     Compressor_Process(&master_comp_state, master_bus_buffer_L, samples_per_channel, &master_p->compressor); // Process L
+    //     Compressor_Process(&master_comp_state, master_bus_buffer_R, samples_per_channel, &master_p->compressor); // Process R (using same state/params?) - Adjust if needed
+    // }
+    //  if (master_p->reverb.enabled) {
+    //     // Reverb usually creates stereo output even from mono input, or processes L/R separately
+    //     // Needs a Reverb_ProcessStereo or similar function signature
+    //     Reverb_ProcessStereo(&master_reverb_state, master_bus_buffer_L, master_bus_buffer_R, samples_per_channel, &master_p->reverb);
+    // }
 
 
     // Apply Master Gain
