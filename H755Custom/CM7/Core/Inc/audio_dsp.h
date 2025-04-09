@@ -19,7 +19,7 @@
  * @brief Initializes the DSP engine, internal states, and effects.
  * @param sample_rate The system audio sample rate (e.g., 48000.0f).
  */
-void AudioDSP_Init(float sample_rate);
+void AudioDSP_Init();
 
 /**
  * @brief Processes one block of audio data according to parameters in shared memory.

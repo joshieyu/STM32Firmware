@@ -143,7 +143,9 @@ void HAL_SAI_RxHalfCpltCallback(SAI_HandleTypeDef *hsai)
 {
     // Called at half buffer, useful for double-buffered processing.
 //    printf("Half buffer received\r\n");
-  ProcessAudioChunk(&audioRxBuffer[0], TDM_RX_HALF_SIZE, &audioTxBuffer[0], STEREO_TX_HALF_SIZE);
+  // ProcessAudioChunk(&audioRxBuffer[0], TDM_RX_HALF_SIZE, &audioTxBuffer[0], STEREO_TX_HALF_SIZE);
+
+  AudioDSP_Process(&audioRxBuffer[0], TDM_RX_HALF_SIZE, &audioTxBuffer[0], STEREO_TX_HALF_SIZE);
 }
 
 void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
@@ -151,7 +153,8 @@ void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
     // This callback is invoked when the DMA finishes a full buffer transfer.
     // You can process the data here, or set a flag for your main loop.
     // printf("Full buffer received\r\n");
-    ProcessAudioChunk(&audioRxBuffer[TDM_RX_HALF_SIZE], TDM_RX_HALF_SIZE, &audioTxBuffer[STEREO_TX_HALF_SIZE], STEREO_TX_HALF_SIZE);
+    // ProcessAudioChunk(&audioRxBuffer[TDM_RX_HALF_SIZE], TDM_RX_HALF_SIZE, &audioTxBuffer[STEREO_TX_HALF_SIZE], STEREO_TX_HALF_SIZE);
+    AudioDSP_Process(&audioRxBuffer[TDM_RX_HALF_SIZE], TDM_RX_HALF_SIZE, &audioTxBuffer[STEREO_TX_HALF_SIZE], STEREO_TX_HALF_SIZE);
     bufferFull = 1;
     // for (int i = 0; i < AUDIO_BUFFER_SIZE; i++)
     //       {
@@ -216,6 +219,13 @@ uint32_t tx_pair_start_index = frame * STEREO_CHANNELS; // frame * 2
 // Assuming the DAC/SAI TX expects data in the MSBs of the 32-bit word
 tx_chunk_start[tx_pair_start_index + 0] = output_sample; // Left
 tx_chunk_start[tx_pair_start_index + 1] = output_sample; // Right (same for mono sum)
+
+// printf("AudioDSP: Processed %d samples\r\n", 256);
+//     for (int i = 0; i < 256; i++) {
+//         if (i % 8 == 0) {
+//             printf("Sample %d: L=%d, R=%d\r\n", i, tx_chunk_start[i * 2], tx_chunk_start[i * 2 + 1]);
+//         }
+//     }
 }
 }
 
@@ -303,6 +313,8 @@ timeout = 0xFFFF;
       printf("--- PCM1865 Initialization Successful ---\r\n");
   }
 
+  PCM1865_SetGainDB_GlobalChannel(&hi2c4, 7, -12.0f); // Set global gain to 0 dB for all channels
+  AudioDSP_Init(44100.0f);
 	// I2C_Scan(&hi2c4);
 
   int number = 0;

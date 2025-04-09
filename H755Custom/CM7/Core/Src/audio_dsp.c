@@ -26,6 +26,7 @@
 // Note: We read directly from shared_buffer_0 as per your updated requirement.
 // Make sure shared_buffer_0 itself is correctly defined and linked to the shared memory address.
 static volatile const MixerParameters* g_params = NULL; // Initialize in AudioDSP_Init
+static volatile MixerParameters g_local_params; // Local copy for processing
 
 // Current sample rate
 static float g_sample_rate = 44100.0f;
@@ -81,50 +82,117 @@ static void CalculatePanFactors(float pan_0_to_1, float* pan_l, float* pan_r) {
 
 // --- Public Function Implementations ---
 
-void AudioDSP_Init(float sample_rate) {
-    g_sample_rate = sample_rate;
-    g_params = shared_buffer_0; // Point to the designated shared buffer
+// void AudioDSP_Init(float sample_rate) {
+//     g_sample_rate = sample_rate;
+//     g_params = shared_buffer_0; // Point to the designated shared buffer
 
-    printf("AudioDSP: Initializing...\r\n");
+//     printf("AudioDSP: Initializing...\r\n");
+//     printf("AudioDSP: Sample Rate: %.1f Hz\r\n", g_sample_rate);
+
+//     if (!g_params) {
+//         printf("AudioDSP: Error! Shared parameter buffer pointer is NULL (shared_buffer_0 invalid?)\r\n");
+//         // Handle fatal error - perhaps hang here if essential
+//         while(1);
+//     }
+
+//     // Initialize internal processing buffers
+//     memset(channel_proc_buffers, 0, sizeof(channel_proc_buffers));
+//     memset(master_bus_buffer_L, 0, sizeof(master_bus_buffer_L));
+//     memset(master_bus_buffer_R, 0, sizeof(master_bus_buffer_R));
+
+//     // Initialize Effect States
+//     printf("AudioDSP: Initializing effect states...\r\n");
+//     for (int i = 0; i < DSP_INPUT_CHANNELS; ++i) {
+//         EQ_Init(&channel_eq_states[i], g_sample_rate);
+//         Compressor_Init(&channel_comp_states[i], g_sample_rate);
+//         Distortion_Init(&channel_dist_states[i]); // Pass state if needed
+//         Phaser_Init(&channel_phaser_states[i], g_sample_rate);
+//         // No reverb state per channel
+//     }
+//     // Initialize Master States
+//     EQ_Init(&master_eq_state, g_sample_rate);
+//     Compressor_Init(&master_comp_state, g_sample_rate);
+//     Reverb_Init(&master_reverb_state, g_sample_rate);
+
+//     printf("AudioDSP: Initialization Complete.\r\n");
+// }
+
+void AudioDSP_Init() {
+
+    printf("AudioDSP (Test Mode): Initializing...\r\n");
     printf("AudioDSP: Sample Rate: %.1f Hz\r\n", g_sample_rate);
 
-    if (!g_params) {
-        printf("AudioDSP: Error! Shared parameter buffer pointer is NULL (shared_buffer_0 invalid?)\r\n");
-        // Handle fatal error - perhaps hang here if essential
-        while(1);
+    // --- Initialize LOCAL Parameters with Defaults ---
+    printf("AudioDSP: Setting default local parameters...\r\n");
+    memset(&g_local_params, 0, sizeof(MixerParameters)); // Clear everything first
+
+    // g_params = shared_buffer_0; // Point to the designated shared buffer
+
+    // Global defaults
+    g_local_params.soloing_active = false;
+    g_local_params.inferencing_active = false;
+    g_local_params.hw_init_ready = true; // Assume ready for testing
+
+    // Master Channel (Index 0) Defaults
+    g_local_params.channels[0].muted = false;
+    g_local_params.channels[0].soloed = false; // Master usually isn't soloed
+    g_local_params.channels[0].panning = 0.5f; // Center
+    g_local_params.channels[0].digital_gain = 0.0f; // Unity gain
+    g_local_params.channels[0].stereo = true; // Default to stereo output
+    // Master Effects Defaults (example: disabled)
+    g_local_params.channels[0].equalizer.enabled = false;
+    // Set some default EQ band params if needed, e.g., flat
+    g_local_params.channels[0].compressor.enabled = false;
+    g_local_params.channels[0].reverb.enabled = false;
+
+    // Input Channels (Indices 1-8) Defaults
+    for (int i = 1; i <= DSP_INPUT_CHANNELS; ++i) {
+        g_local_params.channels[i].muted = false;
+        g_local_params.channels[i].soloed = false;
+        g_local_params.channels[i].panning = 0.5f; // Center pan
+        g_local_params.channels[i].digital_gain = 0.0f; // Unity gain
+        // Input Channel Effects Defaults (example: all disabled)
+        g_local_params.channels[i].equalizer.enabled = false;
+        g_local_params.channels[i].compressor.enabled = false;
+        g_local_params.channels[i].distortion.enabled = false;
+        g_local_params.channels[i].phaser.enabled = false;
+        // Reverb not applicable per input channel in this struct design
     }
 
-    // Initialize internal processing buffers
+    // --- Initialize internal processing buffers ---
     memset(channel_proc_buffers, 0, sizeof(channel_proc_buffers));
     memset(master_bus_buffer_L, 0, sizeof(master_bus_buffer_L));
     memset(master_bus_buffer_R, 0, sizeof(master_bus_buffer_R));
 
-    // // Initialize Effect States
+    // // --- Initialize Effect States ---
     // printf("AudioDSP: Initializing effect states...\r\n");
     // for (int i = 0; i < DSP_INPUT_CHANNELS; ++i) {
     //     EQ_Init(&channel_eq_states[i], g_sample_rate);
     //     Compressor_Init(&channel_comp_states[i], g_sample_rate);
-    //     Distortion_Init(&channel_dist_states[i]); // Pass state if needed
+    //     Distortion_Init(&channel_dist_states[i]);
     //     Phaser_Init(&channel_phaser_states[i], g_sample_rate);
-    //     // No reverb state per channel
     // }
-    // // Initialize Master States
     // EQ_Init(&master_eq_state, g_sample_rate);
     // Compressor_Init(&master_comp_state, g_sample_rate);
     // Reverb_Init(&master_reverb_state, g_sample_rate);
 
-    printf("AudioDSP: Initialization Complete.\r\n");
+    printf("AudioDSP (Test Mode): Initialization Complete.\r\n");
 }
-
 
 void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
                       int32_t* tx_chunk_start, uint32_t tx_chunk_num_stereo_samples)
 {
+
     // --- Pre-Checks ---
-    if (!g_params || !rx_chunk_start || !tx_chunk_start) return;
+    if (!rx_chunk_start || !tx_chunk_start) 
+    {
+        printf("init return 1\r\n");
+        return;
+    }
 
     // Check if hardware is ready (flag set by CM4)
-    if (!g_params->hw_init_ready) {
+    if (!g_local_params.hw_init_ready) {
+        printf("init return\r\n");
         memset(tx_chunk_start, 0, tx_chunk_num_stereo_samples * sizeof(int32_t)); // Output silence
         return;
     }
@@ -153,23 +221,23 @@ void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
 
 
     // --- Stage 2: Per-Channel DSP ---
-    bool solo_mode_active = g_params->soloing_active;
+    bool solo_mode_active = g_local_params.soloing_active;
 
     for (int i = 0; i < DSP_INPUT_CHANNELS; ++i) { // Loop 0-7 for buffers
         int param_idx = i + 1; // Corresponding index in params->channels[1..8]
 
         // Determine if channel should pass based on Mute/Solo
         bool channel_active = true;
-        if (g_params->channels[param_idx].muted) {
+        if (g_local_params.channels[param_idx].muted) {
             channel_active = false;
-        } else if (solo_mode_active && !g_params->channels[param_idx].soloed) {
+        } else if (solo_mode_active && !g_local_params.channels[param_idx].soloed) {
             channel_active = false;
         }
 
         if (channel_active) {
             // Apply effects sequentially if enabled
-            // Pass pointer to relevant parameter struct from shared memory
-            const ChannelParameters* chan_p = &g_params->channels[param_idx];
+            // Pass pointer to relevant parameter struct from local memory
+            const ChannelParameters* chan_p = &g_local_params.channels[param_idx];
 
             // if (chan_p->equalizer.enabled) {
             //     EQ_Process(&channel_eq_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->equalizer);
@@ -200,19 +268,21 @@ void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
 
         // Check active state again (don't sum inactive channels)
         bool channel_active = true;
-        if (g_params->channels[param_idx].muted) channel_active = false;
-        else if (solo_mode_active && !g_params->channels[param_idx].soloed) channel_active = false;
+        if (g_local_params.channels[param_idx].muted) channel_active = false;
+        else if (solo_mode_active && !g_local_params.channels[param_idx].soloed) channel_active = false;
 
         if (channel_active) {
-            float gain_linear = DB_to_Linear(g_params->channels[param_idx].digital_gain);
+            float gain_linear = DB_to_Linear(g_local_params.channels[param_idx].digital_gain);
             float pan_l, pan_r;
-            CalculatePanFactors(g_params->channels[param_idx].panning, &pan_l, &pan_r);
+            CalculatePanFactors(g_local_params.channels[param_idx].panning, &pan_l, &pan_r);
 
             // Apply gain and panning, then sum to master buses
             for (uint32_t frame = 0; frame < samples_per_channel; ++frame) {
                 float sample = channel_proc_buffers[i][frame] * gain_linear;
                 master_bus_buffer_L[frame] += sample * pan_l;
                 master_bus_buffer_R[frame] += sample * pan_r;
+                // master_bus_buffer_L[frame] += sample;
+                // master_bus_buffer_R[frame] += sample;
             }
         }
     }
@@ -220,7 +290,7 @@ void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
 
     // --- Stage 4: Master Bus Processing ---
     // Access master parameters via index 0
-    const ChannelParameters* master_p = &g_params->channels[0];
+    const ChannelParameters* master_p = &g_local_params.channels[0];
 
     // // Apply Master Effects (if enabled)
     // if (master_p->equalizer.enabled) {
@@ -269,7 +339,16 @@ void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
 
         // Write to stereo TX buffer, left-shifting
         uint32_t tx_pair_start_index = frame * DSP_OUTPUT_CHANNELS;
-        tx_chunk_start[tx_pair_start_index + 0] = output_l_24bit << 8; // Left
-        tx_chunk_start[tx_pair_start_index + 1] = output_r_24bit << 8; // Right
+        tx_chunk_start[tx_pair_start_index + 0] = output_l_24bit; // Left
+        tx_chunk_start[tx_pair_start_index + 1] = output_r_24bit; // Right
     }
+
+    // print out buffer for testing
+    // printf("AudioDSP: Processed %d samples\r\n", samples_per_channel);
+    // for (int i = 0; i < samples_per_channel; i++) {
+    //     if (i % 8 == 0) {
+    //         printf("Sample %d: L=%d, R=%d\r\n", i, tx_chunk_start[i * 2], tx_chunk_start[i * 2 + 1]);
+    //     }
+    // }
+    // --- End of Processing ---
 }
