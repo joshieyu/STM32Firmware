@@ -6,9 +6,9 @@
 
 // --- Include Headers for your actual effect implementations ---
 // Ensure these define State structs, _Init, and _Process functions
-// #include "effect_eq.h"
+#include "effect_eq.h"
 // #include "effect_compressor.h"
-// #include "effect_distortion.h"
+#include "effect_distortion.h"
 // #include "effect_phaser.h"
 // #include "effect_reverb.h" // Needed for Master Reverb
 
@@ -19,6 +19,9 @@
 #define FLOAT_SCALE_FACTOR (1.0f / 8388607.0f) // Scale int24 range to approx +/- 1.0f
 #define MAX_AMPLITUDE_24BIT_I (8388607)
 #define MIN_AMPLITUDE_24BIT_I (-8388608)
+
+
+#define TEST_EFFECT_TARGET_CHANNEL 7
 
 // --- Static Variables ---
 
@@ -40,15 +43,15 @@ static float master_bus_buffer_R[DSP_MAX_SAMPLES_PER_CHUNK];
 // These hold the *runtime state* (filter history, LFO phase, etc.)
 
 // // Channel States (Arrays match INPUT channels 0-7)
-// static EQState         channel_eq_states[DSP_INPUT_CHANNELS];
+static EQState         channel_eq_states[DSP_INPUT_CHANNELS];
 // static CompressorState channel_comp_states[DSP_INPUT_CHANNELS];
 // // Distortion might be stateless or need state struct
-// static DistortionState channel_dist_states[DSP_INPUT_CHANNELS]; // Assuming DistortionState exists
+static DistortionState channel_dist_states[DSP_INPUT_CHANNELS]; // Assuming DistortionState exists
 // static PhaserState     channel_phaser_states[DSP_INPUT_CHANNELS];
 // // Reverb state only needed for Master
 
 // // Master Bus States (Master corresponds to channels[0] in params)
-// static EQState         master_eq_state; // Assuming stereo EQ process or separate L/R state if needed
+static EQState         master_eq_state; // Assuming stereo EQ process or separate L/R state if needed
 // static CompressorState master_comp_state; // Assuming stereo Comp process
 // static ReverbState     master_reverb_state;
 
@@ -117,6 +120,70 @@ static void CalculatePanFactors(float pan_0_to_1, float* pan_l, float* pan_r) {
 //     printf("AudioDSP: Initialization Complete.\r\n");
 // }
 
+// void AudioDSP_Init() {
+
+//     printf("AudioDSP (Test Mode): Initializing...\r\n");
+//     printf("AudioDSP: Sample Rate: %.1f Hz\r\n", g_sample_rate);
+
+//     // --- Initialize LOCAL Parameters with Defaults ---
+//     printf("AudioDSP: Setting default local parameters...\r\n");
+//     memset(&g_local_params, 0, sizeof(MixerParameters)); // Clear everything first
+
+//     // g_params = shared_buffer_0; // Point to the designated shared buffer
+
+//     // Global defaults
+//     g_local_params.soloing_active = false;
+//     g_local_params.inferencing_active = false;
+//     g_local_params.hw_init_ready = true; // Assume ready for testing
+
+//     // Master Channel (Index 0) Defaults
+//     g_local_params.channels[0].muted = false;
+//     g_local_params.channels[0].soloed = false; // Master usually isn't soloed
+//     g_local_params.channels[0].panning = 0.5f; // Center
+//     g_local_params.channels[0].digital_gain = 0.0f; // Unity gain
+//     g_local_params.channels[0].stereo = true; // Default to stereo output
+//     // Master Effects Defaults (example: disabled)
+//     g_local_params.channels[0].equalizer.enabled = false;
+//     // Set some default EQ band params if needed, e.g., flat
+//     g_local_params.channels[0].compressor.enabled = false;
+//     g_local_params.channels[0].reverb.enabled = false;
+
+//     // Input Channels (Indices 1-8) Defaults
+//     for (int i = 1; i <= DSP_INPUT_CHANNELS; ++i) {
+//         g_local_params.channels[i].muted = false;
+//         g_local_params.channels[i].soloed = false;
+//         g_local_params.channels[i].panning = 0.5f; // Center pan
+//         g_local_params.channels[i].digital_gain = 0.0f; // Unity gain
+//         // Input Channel Effects Defaults (example: all disabled)
+//         g_local_params.channels[i].equalizer.enabled = false;
+//         g_local_params.channels[i].compressor.enabled = false;
+//         g_local_params.channels[i].distortion.enabled = false;
+//         g_local_params.channels[i].phaser.enabled = false;
+//         // Reverb not applicable per input channel in this struct design
+//     }
+
+//     // --- Initialize internal processing buffers ---
+//     memset(channel_proc_buffers, 0, sizeof(channel_proc_buffers));
+//     memset(master_bus_buffer_L, 0, sizeof(master_bus_buffer_L));
+//     memset(master_bus_buffer_R, 0, sizeof(master_bus_buffer_R));
+
+//     // // --- Initialize Effect States ---
+//     // printf("AudioDSP: Initializing effect states...\r\n");
+//     for (int i = 0; i < DSP_INPUT_CHANNELS; ++i) {
+//         EQ_Init(&channel_eq_states[i], g_sample_rate);
+//     //     Compressor_Init(&channel_comp_states[i], g_sample_rate);
+//         Distortion_Init(&channel_dist_states[i]);
+//     //     Phaser_Init(&channel_phaser_states[i], g_sample_rate);
+//     }
+//     EQ_Init(&master_eq_state, g_sample_rate);
+//     // Compressor_Init(&master_comp_state, g_sample_rate);
+//     // Reverb_Init(&master_reverb_state, g_sample_rate);
+
+//     printf("AudioDSP (Test Mode): Initialization Complete.\r\n");
+// }
+
+// --- Public Function Implementations ---
+
 void AudioDSP_Init() {
 
     printf("AudioDSP (Test Mode): Initializing...\r\n");
@@ -126,8 +193,6 @@ void AudioDSP_Init() {
     printf("AudioDSP: Setting default local parameters...\r\n");
     memset(&g_local_params, 0, sizeof(MixerParameters)); // Clear everything first
 
-    // g_params = shared_buffer_0; // Point to the designated shared buffer
-
     // Global defaults
     g_local_params.soloing_active = false;
     g_local_params.inferencing_active = false;
@@ -135,13 +200,11 @@ void AudioDSP_Init() {
 
     // Master Channel (Index 0) Defaults
     g_local_params.channels[0].muted = false;
-    g_local_params.channels[0].soloed = false; // Master usually isn't soloed
-    g_local_params.channels[0].panning = 0.5f; // Center
-    g_local_params.channels[0].digital_gain = 0.0f; // Unity gain
-    g_local_params.channels[0].stereo = true; // Default to stereo output
-    // Master Effects Defaults (example: disabled)
+    g_local_params.channels[0].soloed = false;
+    g_local_params.channels[0].panning = 0.5f;
+    g_local_params.channels[0].digital_gain = 0.0f;
+    g_local_params.channels[0].stereo = true;
     g_local_params.channels[0].equalizer.enabled = false;
-    // Set some default EQ band params if needed, e.g., flat
     g_local_params.channels[0].compressor.enabled = false;
     g_local_params.channels[0].reverb.enabled = false;
 
@@ -149,35 +212,66 @@ void AudioDSP_Init() {
     for (int i = 1; i <= DSP_INPUT_CHANNELS; ++i) {
         g_local_params.channels[i].muted = false;
         g_local_params.channels[i].soloed = false;
-        g_local_params.channels[i].panning = 0.5f; // Center pan
-        g_local_params.channels[i].digital_gain = 0.0f; // Unity gain
-        // Input Channel Effects Defaults (example: all disabled)
+        g_local_params.channels[i].panning = 0.5f;
+        g_local_params.channels[i].digital_gain = 0.0f;
         g_local_params.channels[i].equalizer.enabled = false;
         g_local_params.channels[i].compressor.enabled = false;
         g_local_params.channels[i].distortion.enabled = false;
         g_local_params.channels[i].phaser.enabled = false;
-        // Reverb not applicable per input channel in this struct design
     }
+
+    // --- *** APPLY AUDIBLE TEST DEFAULTS TO THE SELECTED CHANNEL *** ---
+    // Validate the target channel index
+    if (TEST_EFFECT_TARGET_CHANNEL >= 1 && TEST_EFFECT_TARGET_CHANNEL <= DSP_INPUT_CHANNELS) {
+        printf("AudioDSP: Applying audible test defaults to Channel %d...\r\n", TEST_EFFECT_TARGET_CHANNEL);
+
+        // --- EQ Settings for Target Channel ---
+        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.enabled = true;
+        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.lowShelf.gain_db = -12.0f;
+        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.lowShelf.cutoff_freq = 800.0f;
+        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.lowShelf.q_factor = 0.707f;
+        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.highShelf.gain_db = -12.0f;
+        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.highShelf.cutoff_freq = 2000.0f;
+        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.highShelf.q_factor = 0.707f;
+        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.band0.gain_db = 1.0f; // Strong mid boost
+        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.band0.cutoff_freq = 1000.0f;
+        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.band0.q_factor = 1.5f;
+        // Ensure other bands are flat (should be due to memset, but explicit is safe)
+        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.band1.gain_db = 0.0f;
+        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.band2.gain_db = 0.0f;
+        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.band3.gain_db = 0.0f;
+
+        // --- Distortion Settings for Target Channel ---
+        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].distortion.enabled = true;
+        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].distortion.drive = 13.0f;
+        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].distortion.output_gain_db = -10.0f;
+
+    } else {
+        printf("AudioDSP: Warning - TEST_EFFECT_TARGET_CHANNEL (%d) is invalid. No test effects applied.\r\n", TEST_EFFECT_TARGET_CHANNEL);
+    }
+    // --- *** END OF TEST DEFAULTS APPLICATION *** ---
+
 
     // --- Initialize internal processing buffers ---
     memset(channel_proc_buffers, 0, sizeof(channel_proc_buffers));
     memset(master_bus_buffer_L, 0, sizeof(master_bus_buffer_L));
     memset(master_bus_buffer_R, 0, sizeof(master_bus_buffer_R));
 
-    // // --- Initialize Effect States ---
-    // printf("AudioDSP: Initializing effect states...\r\n");
-    // for (int i = 0; i < DSP_INPUT_CHANNELS; ++i) {
-    //     EQ_Init(&channel_eq_states[i], g_sample_rate);
-    //     Compressor_Init(&channel_comp_states[i], g_sample_rate);
-    //     Distortion_Init(&channel_dist_states[i]);
-    //     Phaser_Init(&channel_phaser_states[i], g_sample_rate);
-    // }
-    // EQ_Init(&master_eq_state, g_sample_rate);
+    // --- Initialize ALL Effect States --- (Keep uncommented)
+    printf("AudioDSP: Initializing effect states...\r\n");
+    for (int i = 0; i < DSP_INPUT_CHANNELS; ++i) {
+        EQ_Init(&channel_eq_states[i], g_sample_rate);
+        // Compressor_Init(&channel_comp_states[i], g_sample_rate);
+        Distortion_Init(&channel_dist_states[i]);
+        // Phaser_Init(&channel_phaser_states[i], g_sample_rate);
+    }
+    EQ_Init(&master_eq_state, g_sample_rate);
     // Compressor_Init(&master_comp_state, g_sample_rate);
     // Reverb_Init(&master_reverb_state, g_sample_rate);
 
     printf("AudioDSP (Test Mode): Initialization Complete.\r\n");
 }
+
 
 void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
                       int32_t* tx_chunk_start, uint32_t tx_chunk_num_stereo_samples)
@@ -241,13 +335,15 @@ void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
 
             // if (chan_p->equalizer.enabled) {
             //     EQ_Process(&channel_eq_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->equalizer);
+            //     // printf("eq here\r\n");
             // }
             // if (chan_p->compressor.enabled) {
             //     Compressor_Process(&channel_comp_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->compressor);
             // }
-            // if (chan_p->distortion.enabled) {
-            //     Distortion_Process(&channel_dist_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->distortion);
-            // }
+            if (chan_p->distortion.enabled) {
+                Distortion_Process(&channel_dist_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->distortion);
+                // printf("distortion here\r\n");
+            }
             // if (chan_p->phaser.enabled) {
             //     Phaser_Process(&channel_phaser_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->phaser);
             // }
