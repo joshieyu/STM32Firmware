@@ -168,7 +168,7 @@ static bool check_coeffs_valid(const BiquadState* target, int band_index) {
 static void EQ_UpdateCoefficients(EQState *state, const EqualizerParameters *params) {
     if (!state || !params) return;
 
-    printf("DEBUG: EQ Updating Coefficients...\n"); // Add print for debugging
+    // printf("DEBUG: EQ Updating Coefficients...\n"); // Add print for debugging
 
     // Calculate coeffs for each band using helper functions
     calc_low_shelf_coeffs(state->sample_rate, params->lowShelf.cutoff_freq, params->lowShelf.q_factor, params->lowShelf.gain_db, &state->band_states[0], 0);
@@ -212,11 +212,11 @@ void EQ_Process(EQState *state, float* buffer, uint32_t num_samples, const Equal
         EQ_UpdateCoefficients(state, params);
     }
 
-    // print out the coefficients for debugging
-    for (int band = 0; band < EQ_MAX_BANDS; ++band) {
-        BiquadState* bs = &state->band_states[band];
-        printf("DEBUG: EQ Band %d Coeffs: b0=%.2e b1=%.2e b2=%.2e a1=%.2e a2=%.2e\n", band, bs->b0, bs->b1, bs->b2, bs->a1, bs->a2);
-    }
+    // // print out the coefficients for debugging
+    // for (int band = 0; band < EQ_MAX_BANDS; ++band) {
+    //     BiquadState* bs = &state->band_states[band];
+    //     printf("DEBUG: EQ Band %d Coeffs: b0=%.2e b1=%.2e b2=%.2e a1=%.2e a2=%.2e\n", band, bs->b0, bs->b1, bs->b2, bs->a1, bs->a2);
+    // }
 
     // Process samples through each band sequentially
     for (int band = 0; band < EQ_MAX_BANDS; ++band) {
@@ -270,7 +270,7 @@ void EQ_Process(EQState *state, float* buffer, uint32_t num_samples, const Equal
                      bs->x2 = 0.0f;
                  }
             }
-            printf("DEBUG: EQ Band %d, Sample %lu: x0=%.2f, y0=%.2f, x1=%.2f, x2=%.2f\n", band, i, x0, y0, bs->x1, bs->x2); // Debug print
+            // printf("DEBUG: EQ Band %d, Sample %lu: x0=%.2f, y0=%.2f, x1=%.2f, x2=%.2f\n", band, i, x0, y0, bs->x1, bs->x2); // Debug print
             buffer[i] = y0; // Output of this band becomes input for the next band
         }
     }

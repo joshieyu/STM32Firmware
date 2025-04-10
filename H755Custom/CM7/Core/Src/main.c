@@ -39,7 +39,7 @@
 #endif
 
 #define PCM1865_Reg_Size 128
-#define AUDIO_BUFFER_SIZE 512
+#define AUDIO_BUFFER_SIZE 1024
 #define TRIANGLE_BUFFER_SIZE 8192
 #define MAX_AMPLITUDE_16BIT (32767)
 #define MIN_AMPLITUDE_16BIT (-32768)
@@ -48,8 +48,8 @@
 
 #define TDM_SLOTS 8
 #define STEREO_CHANNELS 2
-#define TDM_RX_HALF_SIZE 2048
-#define STEREO_TX_HALF_SIZE 512
+#define TDM_RX_HALF_SIZE 4096
+#define STEREO_TX_HALF_SIZE 1024
 
 
 
@@ -312,44 +312,44 @@ timeout = 0xFFFF;
   {
       printf("--- PCM1865 Initialization Successful ---\r\n");
   }
-
-  PCM1865_SetGainDB_GlobalChannel(&hi2c4, 7, -12.0f); // Set global gain to 0 dB for all channels
+  
   AudioDSP_Init(44100.0f);
 	// I2C_Scan(&hi2c4);
-
+  
   int number = 0;
   /* USER CODE END 2 */
-
+  
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-
+  
   uint32_t error = 0;
-
+  
   static uint16_t dummyData[2] = {3, 3};
   if (HAL_SAI_Transmit_DMA(&hsai_BlockA1, &dummyData, 2) != HAL_OK)
-        {
-            // Handle error if needed
-  	  	  printf("HAL_SAI_Transmit_DMA failed A1\r\n");
-  	  	  error = HAL_SAI_GetError(&hsai_BlockA1);
-        }
+  {
+    // Handle error if needed
+    printf("HAL_SAI_Transmit_DMA failed A1\r\n");
+    error = HAL_SAI_GetError(&hsai_BlockA1);
+  }
   if (HAL_SAI_Receive_DMA(&hsai_BlockB1, &audioRxBuffer, AUDIO_BUFFER_SIZE * 8) != HAL_OK)
-      {
-          // Handle error if needed
-	  	  printf("HAL_SAI_Receive_DMA failed B1\r\n");
-	  	  error = HAL_SAI_GetError(&hsai_BlockB1);
-      }
-
+  {
+    // Handle error if needed
+    printf("HAL_SAI_Receive_DMA failed B1\r\n");
+    error = HAL_SAI_GetError(&hsai_BlockB1);
+  }
+  
   if (HAL_SAI_Transmit_DMA(&hsai_BlockB2, (uint8_t*)audioTxBuffer, AUDIO_BUFFER_SIZE * 2) != HAL_OK)
   {
     // Handle error (e.g., call Error_Handler())
     printf("HAL_SAI_Receive_DMA2 failed\r\n");
-//          error = HAL_SAI_GetError(&hsai_BlockB2);
-
-//          while(1);
+    //          error = HAL_SAI_GetError(&hsai_BlockB2);
+    
+    //          while(1);
   }
-
-
-  PCM1865_SetGainDB_GlobalChannel(&hi2c4, 7, 6.0f);
+  
+  
+  // PCM1865_SetGainDB_GlobalChannel(&hi2c4, 7, -12.0f); // Set global gain to 0 dB for all channels
+  PCM1865_SetGainDB_GlobalChannel(&hi2c4, 7, -6.0f);
 
   while (1)
   {

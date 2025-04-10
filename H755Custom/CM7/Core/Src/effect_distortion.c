@@ -20,11 +20,14 @@ void Distortion_Init(DistortionState *state) {
 
 void Distortion_Process(DistortionState *state, float* buffer, uint32_t num_samples, const DistortionParameters *params) {
     if (!state || !buffer || !params || !params->enabled) {
-        
+        printf("Distortion: Bypass\r\n");
         return; // Bypass
     }
     (void)state; // Mark as unused if stateless
 
+    // printf("distortion processing\r\n");
+    // print parameters 
+    // printf("Distortion: Drive = %.2f dB, Output Gain = %.2f dB\r\n", params->drive, params->output_gain_db);
     // Convert gains from dB to linear
     float drive_lin = DB_to_Linear_Dist(fmaxf(0.0f, params->drive)); // Ensure drive >= 0dB
     float output_gain_lin = DB_to_Linear_Dist(params->output_gain_db);
