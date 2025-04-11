@@ -24,6 +24,8 @@
 #include "stdio.h"
 #include "pcm1865.h"
 #include "audio_dsp.h"      // For initializing and controlling the DSP engine
+
+#include <string.h> // For strlen or memcpy
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -52,7 +54,10 @@
 #define STEREO_TX_HALF_SIZE 1024
 
 
+#define SLAVE_ADDR (0x42) // Example address, CHANGE THIS!
 
+// Define the size of data to send
+#define I2C_DATA_SIZE 10
 
 // #define PCM1865_RESET               (0x00)
 // #define PCM1865_PGA_VAL_CH1_L       (0x01)
@@ -85,6 +90,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 
+I2C_HandleTypeDef hi2c3;
 I2C_HandleTypeDef hi2c4;
 
 SAI_HandleTypeDef hsai_BlockA1;
@@ -108,6 +114,13 @@ int32_t audioTxBuffer[AUDIO_BUFFER_SIZE * 2];
 uint8_t dataReadyFlag = 0;
 
 
+uint8_t i2cTxBuffer[I2C_DATA_SIZE];
+
+// Flag to indicate if I2C is ready for transmission (prevents overlapping transfers)
+// Must be volatile as it's modified in ISR and checked in main loop
+volatile uint8_t i2cReady = 1; // 1 = Ready, 0 = Busy
+
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -120,6 +133,7 @@ static void MX_I2C4_Init(void);
 static void MX_SAI1_Init(void);
 static void MX_SPI3_Init(void);
 static void MX_SAI2_Init(void);
+static void MX_I2C3_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -164,6 +178,61 @@ void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
     //     }
       
     // HAL_SAI_DMAPause(&hsai_BlockB1);
+}
+
+void I2C_Scan(I2C_HandleTypeDef *hi2c)
+{
+    char msg[64];
+    HAL_StatusTypeDef res;
+    printf("scanning for i2c devices...\r\n");
+    // I2C addresses are 7-bit. The HAL function expects the 7-bit address shifted left by 1.
+    for (uint8_t addr = 1; addr < 128; addr++) {
+        // Try up to 3 times with a small timeout.
+        res = HAL_I2C_IsDeviceReady(hi2c, addr << 1, 3, 10);
+        if (res == HAL_OK) {
+            sprintf(msg, "Device found at 0x%02X\r\n", addr << 1);
+            // You can send this message over UART, SWV, or your debugger console.
+            printf("%s", msg);
+        }
+    }
+}
+
+void HAL_I2C_MasterTxCpltCallback(I2C_HandleTypeDef *hi2c)
+{
+  // Check if the callback is for I2C3
+  if (hi2c->Instance == I2C3)
+  {
+    printf("I2C3 Master TX Complete.\r\n");
+    // i2cReady = 1; // Set flag to indicate I2C bus is free
+    // Optional: Toggle an LED for success indication
+    // HAL_GPIO_TogglePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin);
+  }
+}
+
+/**
+  * @brief  I2C error callback.
+  * @param  hi2c Pointer to a I2C_HandleTypeDef structure that contains
+  *                the configuration information for the specified I2C.
+  * @retval None
+  */
+void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c)
+{
+  // Check if the callback is for I2C3
+  if (hi2c->Instance == I2C3)
+  {
+  uint32_t error_code = HAL_I2C_GetError(hi2c);
+  printf("!!! I2C3 Error Callback - Code: 0x%lX !!!\r\n", error_code);
+    // Common errors:
+    // HAL_I2C_ERROR_AF: Acknowledge Failure (Slave didn't ACK - check address, wiring, slave code)
+    // HAL_I2C_ERROR_BERR: Bus Error (SDA/SCL line problem)
+
+    // Attempt recovery (optional, might need more robust handling)
+    // HAL_I2C_Init(&hi2c3); // Reinitialize? Use with caution.
+
+    i2cReady = 1; // Allow trying again
+    // Optional: Toggle an error LED
+    // HAL_GPIO_TogglePin(LED_RED_GPIO_Port, LED_RED_Pin);
+  }
 }
 
 
@@ -299,62 +368,106 @@ timeout = 0xFFFF;
   MX_SAI1_Init();
   MX_SPI3_Init();
   MX_SAI2_Init();
+  MX_I2C3_Init();
   /* USER CODE BEGIN 2 */
 	// ADC_INIT();
   HAL_StatusTypeDef status;
-  status = PCM1865_Init(&hi2c4);
-  if (status != HAL_OK)
-  {
-      printf("!!! PCM1865 Initialization Failed (Status: %d) !!!\r\n", status);
-      Error_Handler(); // Or handle error appropriately
-  }
-  else
-  {
-      printf("--- PCM1865 Initialization Successful ---\r\n");
-  }
+  // status = PCM1865_Init(&hi2c4);
+  // if (status != HAL_OK)
+  // {
+  //     printf("!!! PCM1865 Initialization Failed (Status: %d) !!!\r\n", status);
+  //     Error_Handler(); // Or handle error appropriately
+  // }
+  // else
+  // {
+  //     printf("--- PCM1865 Initialization Successful ---\r\n");
+  // }
   
   AudioDSP_Init(44100.0f);
-	// I2C_Scan(&hi2c4);
+	I2C_Scan(&hi2c3);
   
   int number = 0;
   /* USER CODE END 2 */
-  
+
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   
   uint32_t error = 0;
   
-  static uint16_t dummyData[2] = {3, 3};
-  if (HAL_SAI_Transmit_DMA(&hsai_BlockA1, &dummyData, 2) != HAL_OK)
-  {
-    // Handle error if needed
-    printf("HAL_SAI_Transmit_DMA failed A1\r\n");
-    error = HAL_SAI_GetError(&hsai_BlockA1);
-  }
-  if (HAL_SAI_Receive_DMA(&hsai_BlockB1, &audioRxBuffer, AUDIO_BUFFER_SIZE * 8) != HAL_OK)
-  {
-    // Handle error if needed
-    printf("HAL_SAI_Receive_DMA failed B1\r\n");
-    error = HAL_SAI_GetError(&hsai_BlockB1);
-  }
+  // static uint16_t dummyData[2] = {3, 3};
+  // if (HAL_SAI_Transmit_DMA(&hsai_BlockA1, &dummyData, 2) != HAL_OK)
+  // {
+  //   // Handle error if needed
+  //   printf("HAL_SAI_Transmit_DMA failed A1\r\n");
+  //   error = HAL_SAI_GetError(&hsai_BlockA1);
+  // }
+  // if (HAL_SAI_Receive_DMA(&hsai_BlockB1, &audioRxBuffer, AUDIO_BUFFER_SIZE * 8) != HAL_OK)
+  // {
+  //   // Handle error if needed
+  //   printf("HAL_SAI_Receive_DMA failed B1\r\n");
+  //   error = HAL_SAI_GetError(&hsai_BlockB1);
+  // }
   
-  if (HAL_SAI_Transmit_DMA(&hsai_BlockB2, (uint8_t*)audioTxBuffer, AUDIO_BUFFER_SIZE * 2) != HAL_OK)
-  {
-    // Handle error (e.g., call Error_Handler())
-    printf("HAL_SAI_Receive_DMA2 failed\r\n");
-    //          error = HAL_SAI_GetError(&hsai_BlockB2);
+  // if (HAL_SAI_Transmit_DMA(&hsai_BlockB2, (uint8_t*)audioTxBuffer, AUDIO_BUFFER_SIZE * 2) != HAL_OK)
+  // {
+  //   // Handle error (e.g., call Error_Handler())
+  //   printf("HAL_SAI_Receive_DMA2 failed\r\n");
+  //   //          error = HAL_SAI_GetError(&hsai_BlockB2);
     
-    //          while(1);
-  }
+  //   //          while(1);
+  // }
   
   
   // PCM1865_SetGainDB_GlobalChannel(&hi2c4, 7, -12.0f); // Set global gain to 0 dB for all channels
-  PCM1865_SetGainDB_GlobalChannel(&hi2c4, 7, -6.0f);
+  // PCM1865_SetGainDB_GlobalChannel(&hi2c4, 7, -6.0f);
 
+
+  printf("System Initialized. Starting automatic I2C transmission.\r\n");
+
+  // Prepare some data to send
+  for(int i = 0; i < I2C_DATA_SIZE -1; ++i) { // Leave last byte for counter
+      i2cTxBuffer[i] = 'A' + i; // Fill with A, B, C...
+  }
+  i2cTxBuffer[I2C_DATA_SIZE - 1] = 0; // Start counter at 0
+
+  i2cReady = 1; // Ensure I2C is marked as ready initially
   while (1)
   {
     /* USER CODE END WHILE */
+    if (i2cReady) // Check if the previous transmission finished (or if ready initially)
+    {
+        i2cReady = 0; // Mark I2C as busy
 
+        // --- Start I2C Master Transmission (Interrupt Mode) ---
+        // HAL expects the 7-bit address shifted left once!
+        HAL_StatusTypeDef status = HAL_I2C_Master_Transmit_IT(&hi2c3, (SLAVE_ADDR), i2cTxBuffer, I2C_DATA_SIZE);
+
+        if (status != HAL_OK)
+        {
+            // Error initiating transmission
+            // printf("!!! HAL_I2C_Master_Transmit_IT failed! Status: %d\r\n", status);
+            i2cReady = 1; // Mark ready again to allow retrying
+        }
+        else
+        {
+            // Transmission started successfully, wait for callback to set i2cReady=1
+            // printf("I2C Tx Started...\n"); // Optional debug
+
+            // Modify data for next send (e.g., increment a counter)
+            i2cTxBuffer[I2C_DATA_SIZE - 1]++;
+        }
+    } else {
+        // I2C is busy, wait before checking again.
+        // Add a small delay to prevent this loop from consuming 100% CPU
+        // when I2C is busy for a short period. Adjust delay as needed.
+        HAL_Delay(1); // Wait 1 millisecond
+    }
+
+    // --- Other Main Loop Tasks ---
+    // Your audio processing calls, etc. would normally go here if not
+    // entirely handled within timer/DMA interrupts.
+
+    /* USER CODE END 3 */
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -444,6 +557,54 @@ void PeriphCommonClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief I2C3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C3_Init(void)
+{
+
+  /* USER CODE BEGIN I2C3_Init 0 */
+
+  /* USER CODE END I2C3_Init 0 */
+
+  /* USER CODE BEGIN I2C3_Init 1 */
+
+  /* USER CODE END I2C3_Init 1 */
+  hi2c3.Instance = I2C3;
+  hi2c3.Init.Timing = 0x307075B1;
+  hi2c3.Init.OwnAddress1 = 0;
+  hi2c3.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c3.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c3.Init.OwnAddress2 = 0;
+  hi2c3.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c3.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c3.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Analogue filter
+  */
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c3, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Digital filter
+  */
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c3, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C3_Init 2 */
+
+  /* USER CODE END I2C3_Init 2 */
+
 }
 
 /**
@@ -704,7 +865,6 @@ static void MX_DMA_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
 /* USER CODE BEGIN MX_GPIO_Init_1 */
 /* USER CODE END MX_GPIO_Init_1 */
 
@@ -714,16 +874,6 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LED_Output_GPIO_Port, LED_Output_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin : LED_Output_Pin */
-  GPIO_InitStruct.Pin = LED_Output_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LED_Output_GPIO_Port, &GPIO_InitStruct);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
