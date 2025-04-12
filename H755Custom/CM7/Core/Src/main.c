@@ -24,6 +24,7 @@
 #include "stdio.h"
 #include "pcm1865.h"
 #include "audio_dsp.h"      // For initializing and controlling the DSP engine
+#include "mixer_state.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -311,6 +312,7 @@ timeout = 0xFFFF;
   else
   {
       printf("--- PCM1865 Initialization Successful ---\r\n");
+      shared_buffer_0->hw_init_ready = true;
   }
   
   AudioDSP_Init(44100.0f);

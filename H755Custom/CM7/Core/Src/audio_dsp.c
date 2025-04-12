@@ -3,7 +3,6 @@
 #include <string.h> // For memset
 #include <math.h>   // For powf, sinf, cosf etc.
 #include <stdbool.h>
-
 // --- Include Headers for your actual effect implementations ---
 // Ensure these define State structs, _Init, and _Process functions
 #include "effect_eq.h"
@@ -29,7 +28,6 @@
 // Note: We read directly from shared_buffer_0 as per your updated requirement.
 // Make sure shared_buffer_0 itself is correctly defined and linked to the shared memory address.
 static volatile const MixerParameters* g_params = NULL; // Initialize in AudioDSP_Init
-static volatile MixerParameters g_local_params; // Local copy for processing
 
 // Current sample rate
 static float g_sample_rate = 44100.0f;
@@ -132,33 +130,33 @@ static void CalculatePanFactors(float pan_0_to_1, float* pan_l, float* pan_r) {
 //     // g_params = shared_buffer_0; // Point to the designated shared buffer
 
 //     // Global defaults
-//     g_local_params.soloing_active = false;
-//     g_local_params.inferencing_active = false;
-//     g_local_params.hw_init_ready = true; // Assume ready for testing
+//     shared_buffer_0->soloing_active = false;
+//     shared_buffer_0->inferencing_active = false;
+//     shared_buffer_0->hw_init_ready = true; // Assume ready for testing
 
 //     // Master Channel (Index 0) Defaults
-//     g_local_params.channels[0].muted = false;
-//     g_local_params.channels[0].soloed = false; // Master usually isn't soloed
-//     g_local_params.channels[0].panning = 0.5f; // Center
-//     g_local_params.channels[0].digital_gain = 0.0f; // Unity gain
-//     g_local_params.channels[0].stereo = true; // Default to stereo output
+//     shared_buffer_0->channels[0].muted = false;
+//     shared_buffer_0->channels[0].soloed = false; // Master usually isn't soloed
+//     shared_buffer_0->channels[0].panning = 0.5f; // Center
+//     shared_buffer_0->channels[0].digital_gain = 0.0f; // Unity gain
+//     shared_buffer_0->channels[0].stereo = true; // Default to stereo output
 //     // Master Effects Defaults (example: disabled)
-//     g_local_params.channels[0].equalizer.enabled = false;
+//     shared_buffer_0->channels[0].equalizer.enabled = false;
 //     // Set some default EQ band params if needed, e.g., flat
-//     g_local_params.channels[0].compressor.enabled = false;
-//     g_local_params.channels[0].reverb.enabled = false;
+//     shared_buffer_0->channels[0].compressor.enabled = false;
+//     shared_buffer_0->channels[0].reverb.enabled = false;
 
 //     // Input Channels (Indices 1-8) Defaults
 //     for (int i = 1; i <= DSP_INPUT_CHANNELS; ++i) {
-//         g_local_params.channels[i].muted = false;
-//         g_local_params.channels[i].soloed = false;
-//         g_local_params.channels[i].panning = 0.5f; // Center pan
-//         g_local_params.channels[i].digital_gain = 0.0f; // Unity gain
+//         shared_buffer_0->channels[i].muted = false;
+//         shared_buffer_0->channels[i].soloed = false;
+//         shared_buffer_0->channels[i].panning = 0.5f; // Center pan
+//         shared_buffer_0->channels[i].digital_gain = 0.0f; // Unity gain
 //         // Input Channel Effects Defaults (example: all disabled)
-//         g_local_params.channels[i].equalizer.enabled = false;
-//         g_local_params.channels[i].compressor.enabled = false;
-//         g_local_params.channels[i].distortion.enabled = false;
-//         g_local_params.channels[i].phaser.enabled = false;
+//         shared_buffer_0->channels[i].equalizer.enabled = false;
+//         shared_buffer_0->channels[i].compressor.enabled = false;
+//         shared_buffer_0->channels[i].distortion.enabled = false;
+//         shared_buffer_0->channels[i].phaser.enabled = false;
 //         // Reverb not applicable per input channel in this struct design
 //     }
 
@@ -191,38 +189,38 @@ void AudioDSP_Init() {
 
     // --- Initialize LOCAL Parameters with Defaults ---
     printf("AudioDSP: Setting default local parameters...\r\n");
-    memset(&g_local_params, 0, sizeof(MixerParameters)); // Clear everything first
+    // memset(&g_local_params, 0, sizeof(MixerParameters)); // Clear everything first
 
     // Global defaults
-    g_local_params.soloing_active = false;
-    g_local_params.inferencing_active = false;
-    g_local_params.hw_init_ready = true; // Assume ready for testing
+    shared_buffer_0->soloing_active = false;
+    shared_buffer_0->inferencing_active = false;
+    shared_buffer_0->hw_init_ready = true; // Assume ready for testing
 
     // Master Channel (Index 0) Defaults
-    g_local_params.channels[0].muted = false;
-    g_local_params.channels[0].soloed = false;
-    g_local_params.channels[0].panning = 0.5f;
-    g_local_params.channels[0].digital_gain = 0.0f;
-    g_local_params.channels[0].stereo = true;
-    g_local_params.channels[0].equalizer.enabled = false;
-    g_local_params.channels[0].compressor.enabled = false;
-    // g_local_params.channels[0].reverb.enabled = false;
+    shared_buffer_0->channels[0].muted = false;
+    shared_buffer_0->channels[0].soloed = false;
+    shared_buffer_0->channels[0].panning = 0.5f;
+    shared_buffer_0->channels[0].digital_gain = 0.0f;
+    shared_buffer_0->channels[0].stereo = true;
+    shared_buffer_0->channels[0].equalizer.enabled = false;
+    shared_buffer_0->channels[0].compressor.enabled = false;
+    // shared_buffer_0->channels[0].reverb.enabled = false;
 
     // Inside AudioDSP_Init, after other defaults
-    g_local_params.channels[0].reverb.enabled = false;
-    g_local_params.channels[0].reverb.decay_time = 3.0f; // 1.5 seconds
-    g_local_params.channels[0].reverb.wet_level = 0.2f; // 35% wet
+    shared_buffer_0->channels[0].reverb.enabled = false;
+    shared_buffer_0->channels[0].reverb.decay_time = 3.0f; // 1.5 seconds
+    shared_buffer_0->channels[0].reverb.wet_level = 0.2f; // 35% wet
 
     // Input Channels (Indices 1-8) Defaults
     for (int i = 1; i <= DSP_INPUT_CHANNELS; ++i) {
-        g_local_params.channels[i].muted = false;
-        g_local_params.channels[i].soloed = false;
-        g_local_params.channels[i].panning = 0.5f;
-        g_local_params.channels[i].digital_gain = 4.0f;
-        g_local_params.channels[i].equalizer.enabled = false;
-        g_local_params.channels[i].compressor.enabled = false;
-        g_local_params.channels[i].distortion.enabled = false;
-        g_local_params.channels[i].phaser.enabled = false;
+        shared_buffer_0->channels[i].muted = false;
+        shared_buffer_0->channels[i].soloed = false;
+        shared_buffer_0->channels[i].panning = 0.5f;
+        shared_buffer_0->channels[i].digital_gain = 4.0f;
+        shared_buffer_0->channels[i].equalizer.enabled = false;
+        shared_buffer_0->channels[i].compressor.enabled = false;
+        shared_buffer_0->channels[i].distortion.enabled = false;
+        shared_buffer_0->channels[i].phaser.enabled = false;
     }
 
     // --- *** APPLY AUDIBLE TEST DEFAULTS TO THE SELECTED CHANNEL *** ---
@@ -231,39 +229,39 @@ void AudioDSP_Init() {
         printf("AudioDSP: Applying audible test defaults to Channel %d...\r\n", TEST_EFFECT_TARGET_CHANNEL);
 
         // --- EQ Settings for Target Channel ---
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.enabled = false;
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.lowShelf.gain_db = -0.0f;
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.lowShelf.cutoff_freq = 2000.0f;
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.lowShelf.q_factor = 0.707f;
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.highShelf.gain_db = -0.0f;
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.highShelf.cutoff_freq = 3000.0f;
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.highShelf.q_factor = 0.707f;
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.band0.gain_db = 12.0f; // Strong mid boost
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.band0.cutoff_freq = 3000.0f;
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.band0.q_factor = 1.5f;
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.enabled = false;
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.lowShelf.gain_db = -0.0f;
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.lowShelf.cutoff_freq = 2000.0f;
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.lowShelf.q_factor = 0.707f;
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.highShelf.gain_db = -0.0f;
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.highShelf.cutoff_freq = 3000.0f;
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.highShelf.q_factor = 0.707f;
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.band0.gain_db = 12.0f; // Strong mid boost
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.band0.cutoff_freq = 3000.0f;
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.band0.q_factor = 1.5f;
         // Ensure other bands are flat (should be due to memset, but explicit is safe)
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.band1.gain_db = 0.0f;
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.band2.gain_db = 0.0f;
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.band3.gain_db = 0.0f;
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.band1.gain_db = 0.0f;
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.band2.gain_db = 0.0f;
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].equalizer.band3.gain_db = 0.0f;
 
         // --- Distortion Settings for Target Channel ---
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].distortion.enabled = false;
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].distortion.drive = 20.0f;
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].distortion.output_gain_db = -10.0f;
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].distortion.enabled = false;
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].distortion.drive = 20.0f;
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].distortion.output_gain_db = -10.0f;
 
         // --- Phaser Settings for Target Channel ---
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].phaser.enabled = true;
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].phaser.rate = 0.5f; // 0.5 Hz
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].phaser.depth = 0.9f; // 50% depth
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].phaser.enabled = true;
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].phaser.rate = 0.5f; // 0.5 Hz
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].phaser.depth = 0.9f; // 50% depth
 
         // Inside AudioDSP_Init, after setting other defaults for channel 1
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].compressor.enabled = true;
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].compressor.threshold_db = -30.0f; // Low threshold
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].compressor.ratio = 6.0f;      // High ratio (6:1)
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].compressor.attack_ms = 100.0f;     // Fast attack
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].compressor.release_ms = 700.0f;  // Moderate release
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].compressor.knee_db = 0.0f;       // Soft knee of 6dB
-        g_local_params.channels[TEST_EFFECT_TARGET_CHANNEL].compressor.makeup_gain_db = 6.0f; // Add some gain back
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].compressor.enabled = true;
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].compressor.threshold_db = -30.0f; // Low threshold
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].compressor.ratio = 6.0f;      // High ratio (6:1)
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].compressor.attack_ms = 100.0f;     // Fast attack
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].compressor.release_ms = 700.0f;  // Moderate release
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].compressor.knee_db = 0.0f;       // Soft knee of 6dB
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].compressor.makeup_gain_db = 6.0f; // Add some gain back
 
     } else {
         printf("AudioDSP: Warning - TEST_EFFECT_TARGET_CHANNEL (%d) is invalid. No test effects applied.\r\n", TEST_EFFECT_TARGET_CHANNEL);
@@ -304,7 +302,7 @@ void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
     }
 
     // Check if hardware is ready (flag set by CM4)
-    if (!g_local_params.hw_init_ready) {
+    if (!shared_buffer_0->hw_init_ready) {
         printf("init return\r\n");
         memset(tx_chunk_start, 0, tx_chunk_num_stereo_samples * sizeof(int32_t)); // Output silence
         return;
@@ -334,23 +332,23 @@ void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
 
 
     // --- Stage 2: Per-Channel DSP ---
-    bool solo_mode_active = g_local_params.soloing_active;
+    bool solo_mode_active = shared_buffer_0->soloing_active;
 
     for (int i = 0; i < DSP_INPUT_CHANNELS; ++i) { // Loop 0-7 for buffers
         int param_idx = i + 1; // Corresponding index in params->channels[1..8]
 
         // Determine if channel should pass based on Mute/Solo
         bool channel_active = true;
-        if (g_local_params.channels[param_idx].muted) {
+        if (shared_buffer_0->channels[param_idx].muted) {
             channel_active = false;
-        } else if (solo_mode_active && !g_local_params.channels[param_idx].soloed) {
+        } else if (solo_mode_active && !shared_buffer_0->channels[param_idx].soloed) {
             channel_active = false;
         }
 
         if (channel_active) {
             // Apply effects sequentially if enabled
             // Pass pointer to relevant parameter struct from local memory
-            const ChannelParameters* chan_p = &g_local_params.channels[param_idx];
+            const ChannelParameters* chan_p = &shared_buffer_0->channels[param_idx];
 
             if (chan_p->equalizer.enabled) {
                 EQ_Process(&channel_eq_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->equalizer);
@@ -383,13 +381,13 @@ void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
 
         // Check active state again (don't sum inactive channels)
         bool channel_active = true;
-        if (g_local_params.channels[param_idx].muted) channel_active = false;
-        else if (solo_mode_active && !g_local_params.channels[param_idx].soloed) channel_active = false;
+        if (shared_buffer_0->channels[param_idx].muted) channel_active = false;
+        else if (solo_mode_active && !shared_buffer_0->channels[param_idx].soloed) channel_active = false;
 
         if (channel_active) {
-            float gain_linear = DB_to_Linear(g_local_params.channels[param_idx].digital_gain);
+            float gain_linear = DB_to_Linear(shared_buffer_0->channels[param_idx].digital_gain);
             float pan_l, pan_r;
-            CalculatePanFactors(g_local_params.channels[param_idx].panning, &pan_l, &pan_r);
+            CalculatePanFactors(shared_buffer_0->channels[param_idx].panning, &pan_l, &pan_r);
 
             // Apply gain and panning, then sum to master buses
             for (uint32_t frame = 0; frame < samples_per_channel; ++frame) {
@@ -405,7 +403,7 @@ void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
 
     // --- Stage 4: Master Bus Processing ---
     // Access master parameters via index 0
-    const ChannelParameters* master_p = &g_local_params.channels[0];
+    const ChannelParameters* master_p = &shared_buffer_0->channels[0];
 
     // // Apply Master Effects (if enabled)
     if (master_p->equalizer.enabled) {
