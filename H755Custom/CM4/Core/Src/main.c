@@ -190,6 +190,305 @@ void HAL_I2C_ErrorCallback(I2C_HandleTypeDef *hi2c)
   }
 }
 
+
+// --- Application Logic ---
+static void Set_Analog_Gain(uint32_t channel_index, float gain_db)
+{
+  printf("Placeholder: Setting Analog Gain for Channel %lu to %.2f dB\r\n", channel_index, gain_db);
+  // --- TODO: Implement hardware control ---
+}
+
+// --- Updated Command Processing Function ---
+static void Process_Mixer_Command(const MixerCommand *cmd)
+{
+  // Determine which shared buffer to write to (using the volatile pointer)
+  // For simplicity here, we'll just write to shared_buffer_0.
+  // Real implementation would use shared_active_idx_ptr for double buffering.
+  volatile MixerParameters *target_state = shared_buffer_0; // Or determine active buffer
+
+  uint32_t chan_idx = cmd->channel;
+
+  // --- Handle Top-Level Parameters (channels 9-11) ---
+  if (chan_idx >= CH_ID_SOLOING_ACTIVE && chan_idx <= CH_ID_HW_INIT_READY)
+  {
+    bool decoded_bool = DECODE_BOOL(cmd->raw_value);
+    printf("Processing Top-Level Param: ChanID=%lu, Val=%d\n", chan_idx, decoded_bool);
+    switch (chan_idx)
+    {
+    case CH_ID_SOLOING_ACTIVE:
+      target_state->soloing_active = decoded_bool;
+      break;
+    case CH_ID_INFERENCING_ACTIVE:
+      target_state->inferencing_active = decoded_bool;
+      break;
+    case CH_ID_HW_INIT_READY:
+      target_state->hw_init_ready = decoded_bool;
+      // Example: Maybe signal M7 if HW is ready?
+      break;
+    default:
+      printf("!!! Unknown Top-Level Channel ID: %lu !!!\r\n", chan_idx);
+      break;
+    }
+    return; // Done processing top-level param
+  }
+
+  // --- Handle Channel-Specific Parameters (channels 0-8) ---
+  if (chan_idx > 8)
+  {
+    printf("!!! Invalid Channel Index: %lu !!!\r\n", chan_idx);
+    return; // Invalid channel
+  }
+
+  printf("Processing Chan %lu: FX ID=%lu, Param ID=%lu\r\n", chan_idx, cmd->effect_id, cmd->parameter_id);
+
+  // --- Decode Value based on type (assume float unless bool needed) ---
+  // We decode here, specific cases might re-interpret raw_value as bool
+  float decoded_float = DECODE_FLOAT(&cmd->raw_value);
+  bool decoded_bool = DECODE_BOOL(cmd->raw_value);
+
+  switch (cmd->effect_id)
+  {
+  case FX_ID_DIRECT:
+  { // Direct Channel Parameters
+    switch (cmd->parameter_id)
+    {
+    case PARAM_ID_DIRECT_MUTED:
+      target_state->channels[chan_idx].muted = decoded_bool;
+      break;
+    case PARAM_ID_DIRECT_SOLOED:
+      target_state->channels[chan_idx].soloed = decoded_bool;
+      break;
+    case PARAM_ID_DIRECT_PANNING:
+      target_state->channels[chan_idx].panning = decoded_float;
+      break;
+    case PARAM_ID_DIRECT_DIGITAL_GAIN:
+      target_state->channels[chan_idx].digital_gain = decoded_float;
+      break;
+    case PARAM_ID_DIRECT_ANALOG_GAIN:
+      Set_Analog_Gain(chan_idx, decoded_float);
+      break; // Special case
+    case PARAM_ID_DIRECT_STEREO:
+      target_state->channels[chan_idx].stereo = decoded_bool;
+      break;
+    default:
+      printf("!!! Unknown Direct Param ID: %lu !!!\r\n", cmd->parameter_id);
+      break;
+    }
+    break; // End FX_ID_DIRECT
+  }
+  case FX_ID_EQ:
+  { // Equalizer Parameters
+    volatile EqualizerParameters *eq = &target_state->channels[chan_idx].equalizer;
+    switch (cmd->parameter_id)
+    {
+    case PARAM_ID_EQ_ENABLED:
+      eq->enabled = decoded_bool;
+      break;
+    case PARAM_ID_EQ_LS_GAIN:
+      eq->lowShelf.gain_db = decoded_float;
+      break;
+    case PARAM_ID_EQ_LS_FREQ:
+      eq->lowShelf.cutoff_freq = decoded_float;
+      break;
+    case PARAM_ID_EQ_LS_Q:
+      eq->lowShelf.q_factor = decoded_float;
+      break;
+    case PARAM_ID_EQ_HS_GAIN:
+      eq->highShelf.gain_db = decoded_float;
+      break;
+    case PARAM_ID_EQ_HS_FREQ:
+      eq->highShelf.cutoff_freq = decoded_float;
+      break;
+    case PARAM_ID_EQ_HS_Q:
+      eq->highShelf.q_factor = decoded_float;
+      break;
+    case PARAM_ID_EQ_B0_GAIN:
+      eq->band0.gain_db = decoded_float;
+      break;
+    case PARAM_ID_EQ_B0_FREQ:
+      eq->band0.cutoff_freq = decoded_float;
+      break;
+    case PARAM_ID_EQ_B0_Q:
+      eq->band0.q_factor = decoded_float;
+      break;
+    case PARAM_ID_EQ_B1_GAIN:
+      eq->band1.gain_db = decoded_float;
+      break;
+    case PARAM_ID_EQ_B1_FREQ:
+      eq->band1.cutoff_freq = decoded_float;
+      break;
+    case PARAM_ID_EQ_B1_Q:
+      eq->band1.q_factor = decoded_float;
+      break;
+    case PARAM_ID_EQ_B2_GAIN:
+      eq->band2.gain_db = decoded_float;
+      break;
+    case PARAM_ID_EQ_B2_FREQ:
+      eq->band2.cutoff_freq = decoded_float;
+      break;
+    case PARAM_ID_EQ_B2_Q:
+      eq->band2.q_factor = decoded_float;
+      break;
+    case PARAM_ID_EQ_B3_GAIN:
+      eq->band3.gain_db = decoded_float;
+      break;
+    case PARAM_ID_EQ_B3_FREQ:
+      eq->band3.cutoff_freq = decoded_float;
+      break;
+    case PARAM_ID_EQ_B3_Q:
+      eq->band3.q_factor = decoded_float;
+      break;
+    default:
+      printf("!!! Unknown EQ Param ID: %lu !!!\r\n", cmd->parameter_id);
+      break;
+    }
+    break; // End FX_ID_EQ
+  }
+  case FX_ID_COMP:
+  { // Compressor Parameters
+    volatile CompressorParameters *comp = &target_state->channels[chan_idx].compressor;
+    switch (cmd->parameter_id)
+    {
+    case PARAM_ID_COMP_ENABLED:
+      comp->enabled = decoded_bool;
+      break;
+    case PARAM_ID_COMP_THRESH:
+      comp->threshold_db = decoded_float;
+      break;
+    case PARAM_ID_COMP_RATIO:
+      comp->ratio = decoded_float;
+      break;
+    case PARAM_ID_COMP_ATTACK:
+      comp->attack_ms = decoded_float;
+      break;
+    case PARAM_ID_COMP_RELEASE:
+      comp->release_ms = decoded_float;
+      break;
+    case PARAM_ID_COMP_KNEE:
+      comp->knee_db = decoded_float;
+      break;
+    case PARAM_ID_COMP_MAKEUP:
+      comp->makeup_gain_db = decoded_float;
+      break;
+    default:
+      printf("!!! Unknown Comp Param ID: %lu !!!\r\n", cmd->parameter_id);
+      break;
+    }
+    break; // End FX_ID_COMP
+  }
+  case FX_ID_DIST:
+  { // Distortion Parameters
+    volatile DistortionParameters *dist = &target_state->channels[chan_idx].distortion;
+    switch (cmd->parameter_id)
+    {
+    case PARAM_ID_DIST_ENABLED:
+      dist->enabled = decoded_bool;
+      break;
+    case PARAM_ID_DIST_DRIVE:
+      dist->drive = decoded_float;
+      break;
+    case PARAM_ID_DIST_OUTPUT:
+      dist->output_gain_db = decoded_float;
+      break;
+    default:
+      printf("!!! Unknown Dist Param ID: %lu !!!\r\n", cmd->parameter_id);
+      break;
+    }
+    break; // End FX_ID_DIST
+  }
+  case FX_ID_PHASER:
+  { // Phaser Parameters
+    volatile PhaserParameters *phaser = &target_state->channels[chan_idx].phaser;
+    switch (cmd->parameter_id)
+    {
+    case PARAM_ID_PHASER_ENABLED:
+      phaser->enabled = decoded_bool;
+      break;
+    case PARAM_ID_PHASER_RATE:
+      phaser->rate = decoded_float;
+      break;
+    case PARAM_ID_PHASER_DEPTH:
+      phaser->depth = decoded_float;
+      break;
+    default:
+      printf("!!! Unknown Phaser Param ID: %lu !!!\r\n", cmd->parameter_id);
+      break;
+    }
+    break; // End FX_ID_PHASER
+  }
+  case FX_ID_REVERB:
+  { // Reverb Parameters
+    // Optional: Add check if chan_idx != 0, as reverb usually only on master
+    volatile ReverbParameters *reverb = &target_state->channels[chan_idx].reverb;
+    switch (cmd->parameter_id)
+    {
+    case PARAM_ID_REVERB_ENABLED:
+      reverb->enabled = decoded_bool;
+      break;
+    case PARAM_ID_REVERB_DECAY:
+      reverb->decay_time = decoded_float;
+      break;
+    case PARAM_ID_REVERB_WET:
+      reverb->wet_level = decoded_float;
+      break;
+    default:
+      printf("!!! Unknown Reverb Param ID: %lu !!!\r\n", cmd->parameter_id);
+      break;
+    }
+    break; // End FX_ID_REVERB
+  }
+  default:
+    printf("!!! Unknown Effect ID: %lu !!!\r\n", cmd->effect_id);
+    break;
+  } // End switch (effect_id)
+
+  // Optional: Add a memory barrier here if needed for M7 synchronization,
+  // although volatile pointers *should* prevent compiler reordering.
+  // __DSB(); // Data Synchronization Barrier
+
+} // End Process_Mixer_Command
+
+void Initialize_Shared_Memory()
+{
+  printf("Initializing Shared Memory...\r\n");
+
+  // Option 1: Zero-initialize everything initially
+  // Requires careful handling if MPU is already active depending on memory type
+  // Better to initialize with defaults directly.
+
+  // Initialize Index to 0
+  // *shared_active_idx_ptr = 0;
+
+  // Set default parameters in buffer 0
+  volatile MixerParameters *buf0 = shared_buffer_0; // Use volatile pointer
+  // buf0->channels[0].muted = 0; // Example: Main channel not muted
+  // ... set ALL other default parameters for buf0 ...
+  //  for (int ch = 1; ch < 9; ++ch) { // Assuming channels 1-8
+  //      buf0->channels[ch].digital_gain.gain_db = 0.0f; // Sensible default
+  //      buf0->channels[ch].panning.pan = 0.5f;
+  //      buf0->channels[ch].muted = 0;
+  // ... initialize ALL effect defaults for all channels ...
+  //  }
+
+  // Copy defaults to buffer 1 so both start identically
+  // Use memcpy carefully - ensure volatile pointers aren't optimized away if needed
+  // Directly accessing via volatile pointers might be sufficient
+  // volatile MixerParameters* buf1 = shared_buffer_1;
+  // memcpy((void*)buf1, (void*)buf0, sizeof(MixerParameters)); // Cast away volatile for memcpy
+
+  // --- Cache Clean AFTER initializing BOTH buffers ---
+  // Although MPU makes it non-cacheable, good practice if MPU changes later
+  // Or if memcpy involves non-volatile pointers temporarily.
+  // Check CMSIS functions available for your core. e.g. SCB_CleanDCache();
+  // Or clean specific range:
+  // SCB_CleanDCache_by_Addr((uint32_t*)SHARED_MEM_BASE, SHARED_TOTAL_SIZE);
+  // With Non-Cacheable MPU, this clean might technically be redundant, BUT SAFER TO INCLUDE.
+
+  // printf("Shared Memory Initialized. Active Index: %lu\r\n", *shared_active_idx_ptr);
+}
+
+// --- End Application Logic ---
+
 /* USER CODE END 0 */
 
 /**
@@ -207,6 +506,7 @@ int main(void)
   MPU_Config();
 
   /* USER CODE BEGIN Boot_Mode_Sequence_1 */
+  Initialize_Shared_Memory();
   /*HW semaphore Clock enable*/
   __HAL_RCC_HSEM_CLK_ENABLE();
   /* Activate HSEM notification for Cortex-M4*/
@@ -240,6 +540,14 @@ int main(void)
   MX_I2C3_Init();
   /* USER CODE BEGIN 2 */
 
+  // Start initial I2C listening for 17 bytes
+  printf("Starting initial I2C Receive for %d bytes...\r\n", I2C_RX_BUFFER_SIZE);
+  memset(i2c_rx_buffer_isr, 0xDD, I2C_RX_BUFFER_SIZE);
+  HAL_StatusTypeDef status = HAL_I2C_Slave_Receive_IT(&hi2c3, i2c_rx_buffer_isr, I2C_RX_BUFFER_SIZE); // Use new size
+  if (status != HAL_OK)
+  { /* Error Handler */
+  }
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -249,6 +557,64 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    if (g_i2c_message_ready_to_process)
+    {
+      printf("Main Loop: Processing I2C Message.\r\n");
+
+      // Print the full buffer (now 17 bytes)
+      printf("Raw Buffer Hex (%d bytes): ", I2C_RX_BUFFER_SIZE);
+      for (int k = 0; k < I2C_RX_BUFFER_SIZE; k++)
+      {
+        printf("%02X ", i2c_process_buffer[k]);
+      }
+      printf("\r\n");
+
+      // --- BAND-AID: Check first byte and adjust offset ---
+      uint8_t *data_start_ptr = i2c_process_buffer; // Pointer to start of data
+      if (i2c_process_buffer[0] == (CM4_I2C_ADDRESS >> 1))
+      { // Check for 7-bit address 0x42
+        printf("WARN: First byte matches address (0x42). Decoding data from offset 1.\r\n");
+        data_start_ptr = &i2c_process_buffer[1]; // Point to the second byte
+      }
+      else
+      {
+        printf("First byte 0x%02X doesn't match address 0x42. Decoding data from offset 0.\r\n", i2c_process_buffer[0]);
+        // data_start_ptr remains i2c_process_buffer[0]
+      }
+      // --- END BAND-AID ---
+
+      // --- Decode command using the adjusted data pointer ---
+      memcpy(&decoded_command.channel, data_start_ptr + 0, sizeof(uint32_t));      // Bytes 0-3 relative to start_ptr
+      memcpy(&decoded_command.effect_id, data_start_ptr + 4, sizeof(uint32_t));    // Bytes 4-7 relative to start_ptr
+      memcpy(&decoded_command.parameter_id, data_start_ptr + 8, sizeof(uint32_t)); // Bytes 8-11 relative to start_ptr
+      memcpy(&decoded_command.raw_value, data_start_ptr + 12, sizeof(uint32_t));   // Bytes 12-15 relative to start_ptr
+      // --- End Decoding ---
+
+      g_i2c_message_ready_to_process = false; // Clear flag
+
+      Process_Mixer_Command(&decoded_command); // Process the (hopefully) correct data
+      printf("Main Loop: Processing Complete.\r\n");
+    }
+
+    if (g_i2c_error_flag)
+    {
+      // --- Error Recovery (Attempts to re-arm receive for 17 bytes) ---
+      printf("Main Loop: I2C Error Flag SET... Attempting recovery...\r\n");
+      g_i2c_error_flag = false;
+      HAL_Delay(100);
+      printf("--> Re-Arming I2C Receive for %d bytes...\r\n", I2C_RX_BUFFER_SIZE);
+      memset(i2c_rx_buffer_isr, 0xEE, I2C_RX_BUFFER_SIZE);
+      HAL_StatusTypeDef recovery_status = HAL_I2C_Slave_Receive_IT(&hi2c3, i2c_rx_buffer_isr, I2C_RX_BUFFER_SIZE); // Use new size
+      if (recovery_status != HAL_OK)
+      { /* ... Error logging ... */
+        g_i2c_error_flag = true;
+        HAL_Delay(500);
+      }
+      else
+      {
+        printf("Main Loop: Recovery successful: Receive re-armed.\r\n");
+      }
+    }
   }
   /* USER CODE END 3 */
 }
@@ -352,6 +718,7 @@ static void MX_DMA_Init(void)
 static void MX_GPIO_Init(void)
 {
   /* USER CODE BEGIN MX_GPIO_Init_1 */
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
