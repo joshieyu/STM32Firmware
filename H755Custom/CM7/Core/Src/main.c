@@ -315,7 +315,7 @@ timeout = 0xFFFF;
       shared_buffer_0->hw_init_ready = true;
   }
   
-  AudioDSP_Init(44100.0f);
+  AudioDSP_Init(&hi2c4, 44100.0f); // Initialize the DSP engine with I2C handle and sample rate);
 	// I2C_Scan(&hi2c4);
   
   int number = 0;

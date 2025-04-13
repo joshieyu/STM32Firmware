@@ -5,6 +5,9 @@
 #include <stdint.h>
 #include "mixer_state.h" // Include YOUR shared structure definition
 
+#include "pcm1865.h" // For PCM1865 register definitions
+#include "stm32h7xx_hal_i2c.h"
+
 // --- Defines ---
 // Maximum samples per channel in one processing block (DMA half buffer size / num channels)
 // Example: If TDM_RX_HALF_SIZE=4096, TDM_SLOTS=8 => 512
@@ -19,7 +22,7 @@
  * @brief Initializes the DSP engine, internal states, and effects.
  * @param sample_rate The system audio sample rate (e.g., 48000.0f).
  */
-void AudioDSP_Init();
+void AudioDSP_Init(I2C_HandleTypeDef *hi2c, float sample_rate); // Added I2C handle parameter
 
 /**
  * @brief Processes one block of audio data according to parameters in shared memory.

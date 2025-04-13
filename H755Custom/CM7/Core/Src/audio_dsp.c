@@ -29,6 +29,9 @@
 // Make sure shared_buffer_0 itself is correctly defined and linked to the shared memory address.
 static volatile const MixerParameters* g_params = NULL; // Initialize in AudioDSP_Init
 
+// Store the I2C handle pointer provided during initialization
+static I2C_HandleTypeDef *hi2c_adc = NULL; // Added static pointer for I2C handle
+
 // Current sample rate
 static float g_sample_rate = 44100.0f;
 
@@ -41,6 +44,8 @@ static float master_bus_buffer_R[DSP_MAX_SAMPLES_PER_CHUNK];
 // These hold the *runtime state* (filter history, LFO phase, etc.)
 
 // // Channel States (Arrays match INPUT channels 0-7)
+// Analog gain state array
+static float channel_analog_gain_states[DSP_INPUT_CHANNELS]; // Assuming analog gain is per-channel
 static EQState         channel_eq_states[DSP_INPUT_CHANNELS];
 static CompressorState channel_comp_states[DSP_INPUT_CHANNELS];
 // // Distortion might be stateless or need state struct
@@ -181,11 +186,14 @@ static void CalculatePanFactors(float pan_0_to_1, float* pan_l, float* pan_r) {
 // }
 
 // --- Public Function Implementations ---
-
-void AudioDSP_Init() {
+// Added I2C handle parameter
+void AudioDSP_Init(I2C_HandleTypeDef *hi2c, float sample_rate) {
 
     printf("AudioDSP (Test Mode): Initializing...\r\n");
     printf("AudioDSP: Sample Rate: %.1f Hz\r\n", g_sample_rate);
+
+    // Store the I2C handle pointer for later use
+    hi2c_adc = hi2c; // Store the I2C handle pointer
 
     // --- Initialize LOCAL Parameters with Defaults ---
     printf("AudioDSP: Setting default local parameters...\r\n");
@@ -358,6 +366,13 @@ void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
             // Apply effects sequentially if enabled
             // Pass pointer to relevant parameter struct from local memory
             const ChannelParameters* chan_p = &shared_buffer_0->channels[param_idx];
+
+            // Apply analog gain if new command is sent
+            if (chan_p->analog_gain != channel_analog_gain_states[i]) {
+                channel_analog_gain_states[i] = chan_p->analog_gain;
+                
+                PCM1865_SetGainDB_GlobalChannel(hi2c_adc, i, chan_p->analog_gain);
+            }
 
             if (chan_p->equalizer.enabled) {
                 EQ_Process(&channel_eq_states[i], channel_proc_buffers[i], samples_per_channel, &chan_p->equalizer);

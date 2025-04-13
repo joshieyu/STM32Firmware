@@ -65,8 +65,9 @@ typedef struct { // No forward typedef needed here
     bool soloed;
     float panning; // [0.0 .. 1.0]
     float digital_gain; // [-60 dB ... +6 dB]
+    float analog_gain; // [-12 db ... +40 dB]
     bool stereo; // only relevant for the main channel.
-
+    
     EqualizerParameters equalizer;
     CompressorParameters compressor;
     DistortionParameters distortion;

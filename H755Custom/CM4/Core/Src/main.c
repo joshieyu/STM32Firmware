@@ -265,7 +265,8 @@ static void Process_Mixer_Command(const MixerCommand *cmd)
       target_state->channels[chan_idx].digital_gain = decoded_float;
       break;
     case PARAM_ID_DIRECT_ANALOG_GAIN:
-      Set_Analog_Gain(chan_idx, decoded_float);
+    target_state->channels[chan_idx].analog_gain = decoded_float;
+      // Set_Analog_Gain(chan_idx, decoded_float);
       break; // Special case
     case PARAM_ID_DIRECT_STEREO:
       target_state->channels[chan_idx].stereo = decoded_bool;
