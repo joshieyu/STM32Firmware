@@ -352,6 +352,8 @@ timeout = 0xFFFF;
   
   // PCM1865_SetGainDB_GlobalChannel(&hi2c4, 7, -12.0f); // Set global gain to 0 dB for all channels
   PCM1865_SetGainDB_GlobalChannel(&hi2c4, 7, -6.0f);
+  PCM1865_SetGainDB_GlobalChannel(&hi2c4, 7, -6.0f);
+  PCM1865_SetGainDB_GlobalChannel(&hi2c4, 0, 30.0f);
 
   while (1)
   {

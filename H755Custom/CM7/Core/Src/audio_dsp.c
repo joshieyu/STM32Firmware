@@ -20,7 +20,7 @@
 #define MIN_AMPLITUDE_24BIT_I (-8388608)
 
 
-#define TEST_EFFECT_TARGET_CHANNEL 4
+#define TEST_EFFECT_TARGET_CHANNEL 2
 
 // --- Static Variables ---
 
@@ -189,7 +189,7 @@ void AudioDSP_Init() {
 
     // --- Initialize LOCAL Parameters with Defaults ---
     printf("AudioDSP: Setting default local parameters...\r\n");
-    // memset(&g_local_params, 0, sizeof(MixerParameters)); // Clear everything first
+    memset(shared_buffer_0, 0, sizeof(MixerParameters)); // Clear everything first
 
     // Global defaults
     shared_buffer_0->soloing_active = false;
@@ -207,9 +207,9 @@ void AudioDSP_Init() {
     // shared_buffer_0->channels[0].reverb.enabled = false;
 
     // Inside AudioDSP_Init, after other defaults
-    shared_buffer_0->channels[0].reverb.enabled = false;
+    shared_buffer_0->channels[0].reverb.enabled = true;
     shared_buffer_0->channels[0].reverb.decay_time = 3.0f; // 1.5 seconds
-    shared_buffer_0->channels[0].reverb.wet_level = 0.2f; // 35% wet
+    shared_buffer_0->channels[0].reverb.wet_level = 0.50f; // 35% wet
 
     // Input Channels (Indices 1-8) Defaults
     for (int i = 1; i <= DSP_INPUT_CHANNELS; ++i) {

@@ -62,7 +62,7 @@ static void Reverb_UpdateParams(ReverbState *state, const ReverbParameters *para
     // Map decay_time (0.3 to 3s) to feedback gain
     // This is a simplified mapping; real decay involves damping too.
     // We use an overall 'room scale' concept influencing feedback.
-    float room_scale_factor = room_size_scale; // Could be adjusted by a room size param later
+    // float room_scale_factor = room_size_scale; // Could be adjusted by a room size param later
     float feedback_base = room_size_offset;
     // Longer decay = higher feedback gain towards 1.0
     float decay_time_s = Clamp(params->decay_time, 0.1f, 8.0f); // Allow slightly wider range internally
@@ -153,7 +153,7 @@ void Reverb_Init(ReverbState *state, float sample_rate) {
         state->allpasses[i].index = 0;
         state->allpasses[i].feedback = allpass_feedback; // Fixed value
         memset(state->allpasses[i].buffer, 0, sizeof(state->allpasses[i].buffer));
-        printf("  Allpass %d: Delay = %lu samples\n", i, state->allpasses[i].buffer_size);
+        // printf("  Allpass %d: Delay = %lu samples\n", i, state->allpasses[i].buffer_size);
     }
 }
 
@@ -163,6 +163,9 @@ void Reverb_ProcessStereo(ReverbState *state, float* buffer_l, float* buffer_r, 
         // printf("Reverb_Process: Bypass or invalid state\n");
         return; // Bypass
     }
+
+    // print out reverb params for debugging
+    // printf("Reverb_Process: Decay Time = %.2f s, Wet Level = %.2f%%\n", params->decay_time, params->wet_level * 100.0f);
 
     // printf("Reverb_Process: Processing %u samples\n", num_samples);
     // Check if parameters changed
