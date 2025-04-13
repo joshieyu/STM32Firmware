@@ -20,7 +20,7 @@
 #define MIN_AMPLITUDE_24BIT_I (-8388608)
 
 
-#define TEST_EFFECT_TARGET_CHANNEL 2
+#define TEST_EFFECT_TARGET_CHANNEL 8
 
 // --- Static Variables ---
 
@@ -209,7 +209,7 @@ void AudioDSP_Init() {
     // Inside AudioDSP_Init, after other defaults
     shared_buffer_0->channels[0].reverb.enabled = true;
     shared_buffer_0->channels[0].reverb.decay_time = 3.0f; // 1.5 seconds
-    shared_buffer_0->channels[0].reverb.wet_level = 0.50f; // 35% wet
+    shared_buffer_0->channels[0].reverb.wet_level = 30.0f; // 35% wet
 
     // Input Channels (Indices 1-8) Defaults
     for (int i = 1; i <= DSP_INPUT_CHANNELS; ++i) {
@@ -325,8 +325,17 @@ void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
     for (uint32_t frame = 0; frame < samples_per_channel; ++frame) {
         uint32_t rx_frame_start_index = frame * DSP_INPUT_CHANNELS;
         for (int ch = 0; ch < DSP_INPUT_CHANNELS; ++ch) { // Loop 0-7
-            // Convert int24 (in int32, left-aligned) to float approx +/- 1.0
-            channel_proc_buffers[ch][frame] = (float)(rx_chunk_start[rx_frame_start_index + ch] >> 8) * FLOAT_SCALE_FACTOR;
+            // Compensate for misplaced ADC samples (channels 1234 are swapped with 5678)
+            if (ch < 4)
+            {
+                // Convert int24 (in int32, left-aligned) to float approx +/- 1.0
+                channel_proc_buffers[ch][frame] = (float)(rx_chunk_start[rx_frame_start_index + ch + 4] >> 8) * FLOAT_SCALE_FACTOR;
+            }
+            else
+            {
+                // Convert int24 (in int32, left-aligned) to float approx +/- 1.0
+                channel_proc_buffers[ch][frame] = (float)(rx_chunk_start[rx_frame_start_index + ch - 4] >> 8) * FLOAT_SCALE_FACTOR;
+            }
         }
     }
 

@@ -53,7 +53,7 @@ static void Reverb_UpdateParams(ReverbState *state, const ReverbParameters *para
     printf("DEBUG: Reverb Updating Parameters...\n");
 
     // --- Wet/Dry ---
-    float wet = Clamp(params->wet_level, 0.0f, 1.0f); // % to 0-1
+    float wet = Clamp(params->wet_level / 100.0f, 0.0f, 1.0f); // % to 0-1
     state->calculated_wet_level = wet;
     // Could use square root scaling for constant power, or simple linear:
     state->calculated_dry_level = 1.0f - wet;

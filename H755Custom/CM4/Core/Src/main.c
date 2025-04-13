@@ -450,7 +450,7 @@ static void Process_Mixer_Command(const MixerCommand *cmd)
 
 void Initialize_Shared_Memory()
 {
-  printf("Initializing Shared Memory...\r\n");
+  // printf("Initializing Shared Memory...\r\n");
 
   // Option 1: Zero-initialize everything initially
   // Requires careful handling if MPU is already active depending on memory type
@@ -460,7 +460,7 @@ void Initialize_Shared_Memory()
   // *shared_active_idx_ptr = 0;
 
   // Set default parameters in buffer 0
-  volatile MixerParameters *buf0 = shared_buffer_0; // Use volatile pointer
+  // volatile MixerParameters *buf0 = shared_buffer_0; // Use volatile pointer
   // buf0->channels[0].muted = 0; // Example: Main channel not muted
   // ... set ALL other default parameters for buf0 ...
   //  for (int ch = 1; ch < 9; ++ch) { // Assuming channels 1-8
@@ -569,18 +569,9 @@ int main(void)
       }
       printf("\r\n");
 
-      // --- BAND-AID: Check first byte and adjust offset ---
-      uint8_t *data_start_ptr = i2c_process_buffer; // Pointer to start of data
-      if (i2c_process_buffer[0] == (CM4_I2C_ADDRESS >> 1))
-      { // Check for 7-bit address 0x42
-        printf("WARN: First byte matches address (0x42). Decoding data from offset 1.\r\n");
-        data_start_ptr = &i2c_process_buffer[1]; // Point to the second byte
-      }
-      else
-      {
-        printf("First byte 0x%02X doesn't match address 0x42. Decoding data from offset 0.\r\n", i2c_process_buffer[0]);
-        // data_start_ptr remains i2c_process_buffer[0]
-      }
+      // --- PERMANENT BAND-AID: ALWAYS Decode data from offset 1 ---
+      printf("INFO: Applying fixed offset=1 for decoding due to initial byte issue.\r\n");
+      uint8_t *data_start_ptr = &i2c_process_buffer[1]; // ALWAYS point to the second byte
       // --- END BAND-AID ---
 
       // --- Decode command using the adjusted data pointer ---
