@@ -25,6 +25,8 @@
 #include "pcm1865.h"
 #include "audio_dsp.h"      // For initializing and controlling the DSP engine
 #include "mixer_state.h"
+
+#include "core_cm7.h"  // Provides FPU access functions/macros
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -167,68 +169,29 @@ void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
     // HAL_SAI_DMAPause(&hsai_BlockB1);
 }
 
+// void EnableFlushToZero(void) {
+//   // Ensure FPU is enabled first (usually done in SystemInit by default, but good practice)
+//   // SCB->CPACR |= ((3UL << 10*2)|(3UL << 11*2)); // Enable CP10 and CP11 coprocessors (FPU)
 
+//   uint32_t fpccr = __get_FPCCR(); // Read FPU Context Control Register
 
-void ProcessAudioChunk(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
-  int32_t* tx_chunk_start, uint32_t tx_chunk_num_stereo_samples)
-{
-// rx_chunk_num_samples will be TDM_RX_HALF_SIZE (e.g., 4096)
-// tx_chunk_num_stereo_samples will be STEREO_TX_HALF_SIZE (e.g., 1024)
+//   // Check if FZ bit (Bit 24) is already set
+//   if (!(fpccr & (1UL << 24))) {
+//       // Set the FZ bit (Flush-to-Zero mode)
+//       __set_FPCCR(fpccr | (1UL << 24));
+//       printf("FPU Flush-to-Zero Enabled.\n");
+//   } else {
+//       printf("FPU Flush-to-Zero Already Enabled.\n");
+//   }
+  // Optional: Force context save/restore to ensure setting takes effect immediately
+  // __DSB();
+  // __ISB();
+// }
 
-// Calculate how many 'frames' of TDM_SLOTS channels are in the RX chunk
-uint32_t num_frames = rx_chunk_num_samples / TDM_SLOTS; // e.g., 4096 / 8 = 512
+// Call this function early in your initialization sequence:
+// Inside main() after HAL_Init() or at the beginning of AudioDSP_Init()
+// EnableFlushToZero();
 
-// Pre-calculate scaling factor (more efficient)
-// const float scaling_factor = 1.0f / (float)TDM_SLOTS;
-const float scaling_factor = 1.0f;;
-
-for (uint32_t frame = 0; frame < num_frames; ++frame) {
-int32_t sum = 0; // Use 32-bit accumulator
-
-// Calculate the starting index for this frame in the RX chunk
-uint32_t rx_frame_start_index = frame * TDM_SLOTS;
-
-// 1. Sum the 8 channels for this time point
-// --- FIX: Loop limit corrected to TDM_SLOTS ---
-for (int ch = 0; ch < TDM_SLOTS; ++ch) {
-// --- FIX: Removed incorrect right shift ---
-// Assuming rx_chunk_start[idx] already contains the correct 24-bit value
-// within the int32_t (e.g., left-justified or sign-extended)
-sum += rx_chunk_start[rx_frame_start_index + ch] >> 8; // Right shift to convert to 24-bit
-}
-
-// 2. Scale and Clip the sum
-// --- RECOMMENDATION: Using float scaling ---
-float scaled_sum_f = (float)sum * scaling_factor;
-int32_t output_sample; // This will hold the final 24-bit value
-
-// Clip the scaled value
-if (scaled_sum_f >= (float)MAX_AMPLITUDE_24BIT + 0.999f) { // Add tolerance for float representation
-output_sample = MAX_AMPLITUDE_24BIT;
-} else if (scaled_sum_f <= (float)MIN_AMPLITUDE_24BIT - 0.999f) {
-output_sample = MIN_AMPLITUDE_24BIT;
-} else {
-// Cast the scaled float back to int32_t
-// Optional rounding could be added here: e.g., using roundf() from math.h
-output_sample = (int32_t)scaled_sum_f;
-}
-
-// 3. Write the result to the corresponding stereo output position
-uint32_t tx_pair_start_index = frame * STEREO_CHANNELS; // frame * 2
-
-// --- FIX: Left-shift output sample for standard 24-bit SAI formats (I2S, LJ) ---
-// Assuming the DAC/SAI TX expects data in the MSBs of the 32-bit word
-tx_chunk_start[tx_pair_start_index + 0] = output_sample; // Left
-tx_chunk_start[tx_pair_start_index + 1] = output_sample; // Right (same for mono sum)
-
-// printf("AudioDSP: Processed %d samples\r\n", 256);
-//     for (int i = 0; i < 256; i++) {
-//         if (i % 8 == 0) {
-//             printf("Sample %d: L=%d, R=%d\r\n", i, tx_chunk_start[i * 2], tx_chunk_start[i * 2 + 1]);
-//         }
-//     }
-}
-}
 
 /* USER CODE END 0 */
 
@@ -264,7 +227,7 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-  
+  // EnableFlushToZero(); // Enable Flush-to-Zero mode for FPU
   /* USER CODE END Init */
 
   /* Configure the system clock */

@@ -1,93 +1,111 @@
 // Common/Inc/mixer_state.h
 
-#ifndef MIXER_STATE_H // <-- Add Include Guard
-#define MIXER_STATE_H // <-- Add Include Guard
+#ifndef MIXER_STATE_H
+#define MIXER_STATE_H
 
 #include <stdint.h>
-#include <stdbool.h>
+#include <stdbool.h> // Use standard bool
 
 #define SHARED_MEM_BASE 0x38000000
 
-// --- Remove Forward Typedefs (they are redundant with the full definitions below) ---
-// typedef struct EqualizerParameters EqualizerParameters;
-// ... and so on for all structs ...
+// --- Alignment Attribute Macro (Compiler dependent, GCC/Clang example) ---
+#define ALIGN(N) __attribute__((aligned(N)))
 
-// --- Struct Definitions (Keep these as they define the types) ---
+// --- Struct Definitions with Alignment ---
 
 // Helper substruct type for Equalizer shelves/bands
-typedef struct { // No forward typedef needed here
+// Align to 4 bytes because it contains floats
+typedef struct ALIGN(4) {
     float gain_db;
     float cutoff_freq;
     float q_factor;
-} EqualizerBandParameters; // Define the type name *after* the struct body
+} EqualizerBandParameters;
 
-typedef struct { // No forward typedef needed here
+// Align to 4 bytes
+typedef struct ALIGN(4) {
     bool enabled;
+    // bool padding[3]; // Optional explicit padding if needed after bool
     EqualizerBandParameters lowShelf;
     EqualizerBandParameters highShelf;
     EqualizerBandParameters band0;
     EqualizerBandParameters band1;
     EqualizerBandParameters band2;
     EqualizerBandParameters band3;
-} EqualizerParameters; // Define the type name *after* the struct body
+} EqualizerParameters;
 
-typedef struct { // No forward typedef needed here
+// Align to 4 bytes
+typedef struct ALIGN(4) {
     bool enabled;
+    // bool padding[3]; // Optional explicit padding
     float threshold_db;
     float ratio;
     float attack_ms;
     float release_ms;
     float knee_db;
     float makeup_gain_db;
-} CompressorParameters; // Define the type name *after* the struct body
+} CompressorParameters;
 
-typedef struct { // No forward typedef needed here
+// Align to 4 bytes
+typedef struct ALIGN(4) {
     bool enabled;
-    float drive; // 0 db to 20 dB
-    float output_gain_db; // -20 dB to 0 dB
-} DistortionParameters; // Define the type name *after* the struct body
+    // bool padding[3];
+    float drive;
+    float output_gain_db;
+} DistortionParameters;
 
-typedef struct { // No forward typedef needed here
+// Align to 4 bytes
+typedef struct ALIGN(4) {
     bool enabled;
-    float rate; // 0.1 Hz to 10 Hz (logarithmic scaling)
-    float depth; // from 0% to 100%
-} PhaserParameters; // Define the type name *after* the struct body
+    // bool padding[3];
+    float rate;
+    float depth;
+} PhaserParameters;
 
-typedef struct { // No forward typedef needed here
+// Align to 4 bytes
+typedef struct ALIGN(4) {
     bool enabled;
-    float decay_time; // 0.3 seconds to 3 seconds
-    float wet_level; // 0% to 100%
-} ReverbParameters; // Define the type name *after* the struct body
+    // bool padding[3];
+    float decay_time;
+    float wet_level;
+} ReverbParameters;
 
-// Define ChannelParameters *after* all the effect structs it uses
-typedef struct { // No forward typedef needed here
+// Align ChannelParameters to 4 bytes (contains floats and aligned structs)
+typedef struct ALIGN(4) {
+    // Group bools together - compiler might pack them better
     bool muted;
     bool soloed;
-    float panning; // [0.0 .. 1.0]
-    float digital_gain; // [-60 dB ... +6 dB]
-    float analog_gain; // [-12 db ... +40 dB]
-    bool stereo; // only relevant for the main channel.
-    
+    bool stereo;
+    // bool padding1; // Optional explicit padding
+    float analog_gain;
+    float panning;
+    float digital_gain;
+    // Analog gain is handled separately, not stored here
+
+    // Nested structs are already aligned to 4 bytes
     EqualizerParameters equalizer;
     CompressorParameters compressor;
     DistortionParameters distortion;
     PhaserParameters phaser;
     ReverbParameters reverb;
-} ChannelParameters; // Define the type name *after* the struct body
+} ChannelParameters;
 
-// Define MixerParameters *after* ChannelParameters
-typedef struct { // No forward typedef needed here
-    ChannelParameters channels[9]; // 0 = main, 1-8 correspond to input channels 1 to 8
+// Align MixerParameters to 8 bytes (or 16 if very paranoid/using specific SIMD)
+// Contains an array of aligned structs and bools at the end.
+typedef struct ALIGN(8) { // Align main struct to 8 bytes
+    ChannelParameters channels[9]; // Array of aligned structs
+
+    // Bools at the end
     bool soloing_active;
     bool inferencing_active;
     bool hw_init_ready;
-} MixerParameters; // Define the type name *after* the struct body
+    // bool padding_end[1]; // Optional padding to make total size multiple of 8? Check sizeof.
+} MixerParameters;
 
 
-// --- Declarations of Global Variables (use extern) ---
-// This tells the compiler these variables exist elsewhere.
+// --- Declarations of Global Variables ---
+// Using volatile and const correctly for shared memory pointers
 extern volatile MixerParameters * const shared_buffer_0;
-extern volatile MixerParameters * const shared_buffer_1; // Keep if using double buffering
-extern volatile uint32_t * const shared_active_idx_ptr; // Keep if using double buffering
+// extern volatile MixerParameters * const shared_buffer_1; // Uncomment if using double buffer
+// extern volatile uint32_t * const shared_active_idx_ptr; // Uncomment if using double buffer
 
-#endif // MIXER_STATE_H <-- Add Include Guard End -->
+#endif // MIXER_STATE_H

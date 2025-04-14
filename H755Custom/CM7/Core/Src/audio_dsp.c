@@ -215,7 +215,7 @@ void AudioDSP_Init(I2C_HandleTypeDef *hi2c, float sample_rate) {
     // shared_buffer_0->channels[0].reverb.enabled = false;
 
     // Inside AudioDSP_Init, after other defaults
-    shared_buffer_0->channels[0].reverb.enabled = true;
+    shared_buffer_0->channels[0].reverb.enabled = false;
     shared_buffer_0->channels[0].reverb.decay_time = 3.0f; // 1.5 seconds
     shared_buffer_0->channels[0].reverb.wet_level = 30.0f; // 35% wet
 
@@ -276,6 +276,10 @@ void AudioDSP_Init(I2C_HandleTypeDef *hi2c, float sample_rate) {
     }
     // --- *** END OF TEST DEFAULTS APPLICATION *** ---
 
+    // --- Phaser Settings for Target Channel ---
+    shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL-1].phaser.enabled = true;
+    shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL-1].phaser.rate = 0.5f; // 0.5 Hz
+    shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL-1].phaser.depth = 0.9f; // 50% depth
 
     // --- Initialize internal processing buffers ---
     memset(channel_proc_buffers, 0, sizeof(channel_proc_buffers));
@@ -400,29 +404,70 @@ void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
     memset(master_bus_buffer_L, 0, samples_per_channel * sizeof(float));
     memset(master_bus_buffer_R, 0, samples_per_channel * sizeof(float));
 
+    const float silence_threshold = 1e-9f; // -180 dBFS approx, adjust if needed
+
+    // for (int i = 0; i < DSP_INPUT_CHANNELS; ++i) { // Loop 0-7 for buffers
+    //     int param_idx = i + 1; // Corresponding index in params->channels[1..8]
+
+    //     // Check active state again (don't sum inactive channels)
+    //     bool channel_active = true;
+    //     if (shared_buffer_0->channels[param_idx].muted) channel_active = false;
+    //     else if (solo_mode_active && !shared_buffer_0->channels[param_idx].soloed) channel_active = false;
+
+    //     if (channel_active) {
+    //         float gain_linear = DB_to_Linear(shared_buffer_0->channels[param_idx].digital_gain);
+    //         float pan_l, pan_r;
+    //         CalculatePanFactors(shared_buffer_0->channels[param_idx].panning, &pan_l, &pan_r);
+
+    //         // Apply gain and panning, then sum to master buses
+    //         for (uint32_t frame = 0; frame < samples_per_channel; ++frame) {
+    //             float sample = channel_proc_buffers[i][frame] * gain_linear;
+    //             master_bus_buffer_L[frame] += sample * pan_l;
+    //             master_bus_buffer_R[frame] += sample * pan_r;
+    //             // master_bus_buffer_L[frame] += sample;
+    //             // master_bus_buffer_R[frame] += sample;
+    //         }
+    //     }
+    // }
     for (int i = 0; i < DSP_INPUT_CHANNELS; ++i) { // Loop 0-7 for buffers
         int param_idx = i + 1; // Corresponding index in params->channels[1..8]
 
-        // Check active state again (don't sum inactive channels)
+        // Check active state (Mute/Solo)
         bool channel_active = true;
+        // Access parameters using the appropriate pointer (g_params or shared_buffer_0)
+        // Assuming shared_buffer_0 is correct based on previous code context
         if (shared_buffer_0->channels[param_idx].muted) channel_active = false;
         else if (solo_mode_active && !shared_buffer_0->channels[param_idx].soloed) channel_active = false;
 
-        if (channel_active) {
-            float gain_linear = DB_to_Linear(shared_buffer_0->channels[param_idx].digital_gain);
-            float pan_l, pan_r;
-            CalculatePanFactors(shared_buffer_0->channels[param_idx].panning, &pan_l, &pan_r);
-
-            // Apply gain and panning, then sum to master buses
-            for (uint32_t frame = 0; frame < samples_per_channel; ++frame) {
-                float sample = channel_proc_buffers[i][frame] * gain_linear;
-                master_bus_buffer_L[frame] += sample * pan_l;
-                master_bus_buffer_R[frame] += sample * pan_r;
-                // master_bus_buffer_L[frame] += sample;
-                // master_bus_buffer_R[frame] += sample;
+        if (channel_active && i != 6) {
+            // --- Check if the channel buffer is effectively silent ---
+            bool effectively_silent = true;
+            for(uint32_t frame = 0; frame < samples_per_channel; ++frame) {
+                 // Use fabsf for absolute value with floats
+                 if(fabsf(channel_proc_buffers[i][frame]) > silence_threshold) {
+                     effectively_silent = false;
+                     break; // Found a non-silent sample, no need to check further
+                 }
             }
-        }
-    }
+
+            // --- Only process and sum if channel is NOT effectively silent ---
+            if (!effectively_silent) {
+                float gain_linear = DB_to_Linear(shared_buffer_0->channels[param_idx].digital_gain);
+                float pan_l, pan_r;
+                CalculatePanFactors(shared_buffer_0->channels[param_idx].panning, &pan_l, &pan_r);
+
+                // Apply gain and panning, then sum to master buses
+                for (uint32_t frame = 0; frame < samples_per_channel; ++frame) {
+                    float sample = channel_proc_buffers[i][frame] * gain_linear;
+                    master_bus_buffer_L[frame] += sample * pan_l;
+                    master_bus_buffer_R[frame] += sample * pan_r;
+                }
+            }
+            // else { // Optional: Print if skipping a channel due to silence
+            //    printf("DEBUG: Skipping silent active channel %d in mixdown\n", param_idx);
+            // }
+        } // end if(channel_active)
+    } 
 
 
     // --- Stage 4: Master Bus Processing ---
@@ -435,11 +480,11 @@ void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
         EQ_Process(&master_eq_state, master_bus_buffer_L, samples_per_channel, &master_p->equalizer); // Process L
         EQ_Process(&master_eq_state, master_bus_buffer_R, samples_per_channel, &master_p->equalizer); // Process R (using same state/params?) - Adjust if EQ needs separate L/R state
     }
-    // if (master_p->compressor.enabled) {
-    //     // Assuming Compressor_Process handles stereo or call twice
-    //     Compressor_Process(&master_comp_state, master_bus_buffer_L, samples_per_channel, &master_p->compressor); // Process L
-    //     Compressor_Process(&master_comp_state, master_bus_buffer_R, samples_per_channel, &master_p->compressor); // Process R (using same state/params?) - Adjust if needed
-    // }
+    if (master_p->compressor.enabled) {
+        // Assuming Compressor_Process handles stereo or call twice
+        Compressor_Process(&master_comp_state, master_bus_buffer_L, samples_per_channel, &master_p->compressor); // Process L
+        Compressor_Process(&master_comp_state, master_bus_buffer_R, samples_per_channel, &master_p->compressor); // Process R (using same state/params?) - Adjust if needed
+    }
 
      if (master_p->reverb.enabled) {
         // Reverb usually creates stereo output even from mono input, or processes L/R separately
@@ -467,6 +512,11 @@ void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
 
     // --- Stage 5: Output Formatting (Float -> Int24 -> Int32 Left-Aligned) ---
     for (uint32_t frame = 0; frame < samples_per_channel; ++frame) {
+
+        // print out samples for debugging
+        // printf("Sample %d: L=%f, R=%f\r\n", frame, master_bus_buffer_L[frame], master_bus_buffer_R[frame]);
+
+
         // Clip final float values (nominally +/- 1.0) before converting
         float clipped_l = ClipFloat(master_bus_buffer_L[frame], -1.0f, 1.0f);
         float clipped_r = ClipFloat(master_bus_buffer_R[frame], -1.0f, 1.0f);
@@ -474,6 +524,7 @@ void AudioDSP_Process(int32_t* rx_chunk_start, uint32_t rx_chunk_num_samples,
         // Scale float to 24-bit integer range
         int32_t output_l_24bit = (int32_t)(clipped_l * (float)MAX_AMPLITUDE_24BIT_I);
         int32_t output_r_24bit = (int32_t)(clipped_r * (float)MAX_AMPLITUDE_24BIT_I);
+
 
         // Write to stereo TX buffer, left-shifting
         uint32_t tx_pair_start_index = frame * DSP_OUTPUT_CHANNELS;

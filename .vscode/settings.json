@@ -58,6 +58,7 @@
   "C_Cpp_Runner.msvcSecureNoWarnings": false,
   "files.associations": {
     "*.java": "java",
-    "stdbool.h": "c"
+    "stdbool.h": "c",
+    "mixer_state.h": "c"
   }
 }

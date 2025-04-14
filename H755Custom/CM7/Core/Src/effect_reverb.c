@@ -173,6 +173,15 @@ void Reverb_ProcessStereo(ReverbState *state, float* buffer_l, float* buffer_r, 
         Reverb_UpdateParams(state, params);
     }
 
+    // // testing
+//     bool input_nan = false;
+    // for(uint32_t k=0; k<num_samples; ++k) {
+    //     if(isnan(buffer_l[k]) || isinf(buffer_l[k]) || isnan(buffer_r[k]) || isinf(buffer_r[k])) {
+    //          input_nan = true; break;
+    //     }
+    // }
+    // if(input_nan) printf("ERROR: Reverb input contains NaN/Inf!\n");
+
     // Get wet/dry levels
     const float wet_level = state->calculated_wet_level;
     const float dry_level = state->calculated_dry_level;
