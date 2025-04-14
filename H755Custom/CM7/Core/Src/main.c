@@ -108,7 +108,9 @@ int32_t single_value_dma_buffer[2]; // Size is 2 for L/R pair
 // Global buffer to capture ADC data from SAI
 int32_t audioRxBuffer[AUDIO_BUFFER_SIZE * 8];
 int32_t audioTxBuffer[AUDIO_BUFFER_SIZE * 2];
-uint8_t dataReadyFlag = 0;
+volatile bool process_buffer_0 = false; // True when first half (0..HALF-1) is ready
+volatile bool process_buffer_1 = false; // True when second half 
+volatile bool audio_error_flag = false;
 
 
 /* USER CODE END PV */
@@ -147,8 +149,12 @@ void HAL_SAI_RxHalfCpltCallback(SAI_HandleTypeDef *hsai)
     // Called at half buffer, useful for double-buffered processing.
 //    printf("Half buffer received\r\n");
   // ProcessAudioChunk(&audioRxBuffer[0], TDM_RX_HALF_SIZE, &audioTxBuffer[0], STEREO_TX_HALF_SIZE);
-
-  AudioDSP_Process(&audioRxBuffer[0], TDM_RX_HALF_SIZE, &audioTxBuffer[0], STEREO_TX_HALF_SIZE);
+  process_buffer_0 = true;
+  if (process_buffer_1 == true) {
+    // Overrun condition - processing didn't finish the last block in time!
+    audio_error_flag = true; // Signal error
+  }
+  // AudioDSP_Process(&audioRxBuffer[0], TDM_RX_HALF_SIZE, &audioTxBuffer[0], STEREO_TX_HALF_SIZE);
 }
 
 void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
@@ -156,9 +162,18 @@ void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
     // This callback is invoked when the DMA finishes a full buffer transfer.
     // You can process the data here, or set a flag for your main loop.
     // printf("Full buffer received\r\n");
+
+    process_buffer_1 = true;
+    // Optional: Check if the other half flag is still set (indicates CPU is too slow)
+   if (process_buffer_0 == true) {
+       // Overrun condition - processing didn't finish the last block in time!
+       audio_error_flag = true; // Signal error
+       // Consider adding debug output or LED toggle here
+       // printf("!!! Audio Overrun (Cplt) !!!\n");
+   }
     // ProcessAudioChunk(&audioRxBuffer[TDM_RX_HALF_SIZE], TDM_RX_HALF_SIZE, &audioTxBuffer[STEREO_TX_HALF_SIZE], STEREO_TX_HALF_SIZE);
-    AudioDSP_Process(&audioRxBuffer[TDM_RX_HALF_SIZE], TDM_RX_HALF_SIZE, &audioTxBuffer[STEREO_TX_HALF_SIZE], STEREO_TX_HALF_SIZE);
-    bufferFull = 1;
+    // AudioDSP_Process(&audioRxBuffer[TDM_RX_HALF_SIZE], TDM_RX_HALF_SIZE, &audioTxBuffer[STEREO_TX_HALF_SIZE], STEREO_TX_HALF_SIZE);
+    // bufferFull = 1;
     // for (int i = 0; i < AUDIO_BUFFER_SIZE; i++)
     //       {
     //         if (i % 8 == 0) {
@@ -323,6 +338,46 @@ timeout = 0xFFFF;
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    // --- Poll for Audio Processing Flags ---
+
+    // Check and clear audio error flag first
+    if(audio_error_flag) {
+      // printf("--- Audio Error Detected! --- \n");
+      // Implement error handling: Stop DMA? Re-init? Log?
+      // For now, just clear the flag to allow potential recovery
+      audio_error_flag = false;
+      // Consider adding a delay or specific recovery action here
+  }
+
+
+  // Process first half if flag is set
+  if (process_buffer_0) {
+      process_buffer_0 = false; // Clear flag BEFORE processing
+      // Ensure interrupts are briefly disabled if state could be inconsistent
+      // uint32_t primask_bit = __get_PRIMASK();
+      // __disable_irq();
+      AudioDSP_Process(&audioRxBuffer[0],
+                       TDM_RX_HALF_SIZE,
+                       &audioTxBuffer[0],
+                       STEREO_TX_HALF_SIZE);
+      // __set_PRIMASK(primask_bit); // Re-enable interrupts
+  }
+
+  // Process second half if flag is set
+  if (process_buffer_1) {
+      process_buffer_1 = false; // Clear flag BEFORE processing
+      // uint32_t primask_bit = __get_PRIMASK();
+      // __disable_irq();
+      AudioDSP_Process(&audioRxBuffer[TDM_RX_HALF_SIZE], // Start from middle
+                       TDM_RX_HALF_SIZE,
+                       &audioTxBuffer[STEREO_TX_HALF_SIZE], // Start from middle
+                       STEREO_TX_HALF_SIZE);
+       // __set_PRIMASK(primask_bit); // Re-enable interrupts
+  }
+
+  // --- Other Main Loop Tasks ---
+  // Place less time-critical tasks here.
+  // Avoid long delays or blocking operations!
   }
   /* USER CODE END 3 */
 }

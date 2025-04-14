@@ -258,7 +258,7 @@ void AudioDSP_Init(I2C_HandleTypeDef *hi2c, float sample_rate) {
         shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].distortion.output_gain_db = -10.0f;
 
         // --- Phaser Settings for Target Channel ---
-        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].phaser.enabled = true;
+        shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].phaser.enabled = false;
         shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].phaser.rate = 0.5f; // 0.5 Hz
         shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL].phaser.depth = 0.9f; // 50% depth
 
@@ -277,7 +277,7 @@ void AudioDSP_Init(I2C_HandleTypeDef *hi2c, float sample_rate) {
     // --- *** END OF TEST DEFAULTS APPLICATION *** ---
 
     // --- Phaser Settings for Target Channel ---
-    shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL-1].phaser.enabled = true;
+    shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL-1].phaser.enabled = false;
     shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL-1].phaser.rate = 0.5f; // 0.5 Hz
     shared_buffer_0->channels[TEST_EFFECT_TARGET_CHANNEL-1].phaser.depth = 0.9f; // 50% depth
 
